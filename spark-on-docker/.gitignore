@@ -1,0 +1,4 @@
+
+# running docker-compose up creates these dirs:
+./apps
+./data
