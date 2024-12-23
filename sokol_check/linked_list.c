@@ -1,3 +1,5 @@
 #include <linked_list.h>
 
-int foo();
+int foo(){
+    return 2;
+}
