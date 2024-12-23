@@ -31,8 +31,12 @@ hello: hello.o linked_list.o
 	$(CC) $(INCLUDES) hello.o linked_list.o -o hello
 
 hello.o: hello.c linked_list.h
-	$(CC) $(INCLUDES) hello.c -c hello.o
+	#$(CC) $(INCLUDES) hello.c -c hello.o # gives "linker input file unused" error
+	$(CC) -c $(INCLUDES) hello.c -o hello.o
 
 linked_list.o: linked_list.c linked_list.h
-	$(CC) $(INCLUDES) linked_list.c -c linked_list.o
+	#$(CC) $(INCLUDES) linked_list.c -c linked_list.o # gives "linker input file unused" error
+	$(CC) -c $(INCLUDES) linked_list.c -o linked_list.o
 
+clean:
+	rm hello hello.o linked_list.o
