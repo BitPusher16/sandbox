@@ -1,0 +1,5 @@
+# depslib dependency file v1.0
+1745638955 source:/home/fj/src/sandbox/codeblocks_warmup/hello_project/main.c
+	<stdio.h>
+	<stdlib.h>
+
