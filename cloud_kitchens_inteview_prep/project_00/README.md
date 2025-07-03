@@ -89,4 +89,21 @@ https://www.reddit.com/r/vscode/comments/131shdm/tldr_question_how_to_switch_bet
  "when": "terminalFocus"
 },
 
+# example python project structure:
 https://blog.pamelafox.org/2022/09/how-i-setup-python-project.html
+
+
+# fastapi tutorial:
+https://fastapi.tiangolo.com/tutorial/
+
+###
+
+POST https://example.com/comments HTTP/1.1
+content-type: application/json
+
+{
+    "name": "sample",
+    "time": "Wed, 21 Oct 2015 18:27:50 GMT"
+}
+
+###
