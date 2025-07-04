@@ -1,27 +1,30 @@
 from fastapi import FastAPI
 from enum import Enum
+from pydantic import BaseModel
 
 class ModelName(str, Enum):
     alexnet = "alexnet"
     resnet = "resnet"
     lenet = "lenet"
 
-fake_items_db = [{"item_name": "Foo"}, {"item_name": "Bar"}, {"item_name": "Baz"}]
+fake_items_db = [{"item_name": "Foo"}, {"item_name": "Bar"}, {"item_name": "Baz"}, {"item_name": "Bif"}]
 
-# http://127.0.0.1:8000/docs
+class Item(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    tax: float | None = None
+
 app = FastAPI()
 
-# http://127.0.0.1:8000/
 @app.get("/")
 async def root():
     return {"message": "Hello World!"}
 
-# http://127.0.0.1:8000/items/1234
 @app.get("/items/{item_id}")
 async def read_item(item_id: int):
     return {"item_id": item_id}
 
-# http://127.0.0.1:8000/models/alexnet
 @app.get("/models/{model_name}")
 async def get_model(model_name: ModelName):
     if model_name is ModelName.alexnet:
@@ -30,22 +33,19 @@ async def get_model(model_name: ModelName):
         return {"model_name": model_name, "message": "LeCNN all the images"}
     return {"model_name": model_name, "message": "Have some residuals"}
 
-# http://127.0.0.1:8000/items
 @app.get("/items/")
 async def read_items(skip: int = 0, limit: int = 10):
     return fake_items_db[skip : skip + limit]
 
+@app.post("/create-item/")
+async def create_item(item: Item):
+    return item
 
-"""
+@app.post("/create-item-with-tax/")
+async def create_item_with_tax(item: Item):
+    item_dict = item.dict()
+    if item.tax is not None:
+        price_with_tax = item.price + item.tax
+        item_dict.update({"price_with_tax": price_with_tax})
+    return item_dict
 
-###
-
-POST https://example.com/comments HTTP/1.1
-content-type: application/json
-
-{
-    "name": "sample",
-    "time": "Wed, 21 Oct 2015 18:27:50 GMT"
-}
-
-"""
