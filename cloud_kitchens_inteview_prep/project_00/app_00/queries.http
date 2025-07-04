@@ -45,3 +45,14 @@ content-type: application/json
     "price": 3.2,
     "tax": 1.25
 }
+
+###
+POST http://127.0.0.1:8000/heroes HTTP/1.1
+content-type: application/json
+
+{
+  "id": 12,
+  "name": "thor",
+  "age": 0,
+  "secret_name": "odinson"
+}
