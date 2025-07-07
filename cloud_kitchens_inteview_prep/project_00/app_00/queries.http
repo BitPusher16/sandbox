@@ -14,9 +14,13 @@ content-type: application/json
 
 
 ###
+http://127.0.0.1:8000/
+###
 http://127.0.0.1:8000/docs
 ###
-http://127.0.0.1:8000/
+http://127.0.0.1:8000/redoc
+###
+http://127.0.0.1:8000/openapi.json
 ###
 http://127.0.0.1:8000/items/1234
 ###
@@ -51,8 +55,19 @@ POST http://127.0.0.1:8000/heroes HTTP/1.1
 content-type: application/json
 
 {
-  "id": 12,
+  "id": 13,
   "name": "thor",
   "age": 0,
   "secret_name": "odinson"
+}
+
+###
+POST http://127.0.0.1:8000/heroes HTTP/1.1
+content-type: application/json
+
+{
+  "id": 13,
+  "name": "loki",
+  "age": 0,
+  "secret_name": "trickster"
 }

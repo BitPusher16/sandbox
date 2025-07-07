@@ -99,3 +99,37 @@ https://fastapi.tiangolo.com/tutorial/
 # bigger fastapi applications
 https://fastapi.tiangolo.com/tutorial/bigger-applications/
 fastapi dev app_00/main_00.py
+
+# uuid in sqlmodel
+https://sqlmodel.tiangolo.com/advanced/uuid/#distributed-uuids
+
+# to run:
+fastapi dev app_00/main_01.py
+
+# scope:
+in scope:
+- tests
+- parallelism and concurrency
+- stress tests (?)
+
+out of scope:
+- authorization
+- authentication
+- data validation (?)
+- user privacy, encryption, GDPR concerns
+
+# using regular expressions to validate fastapi arguments:
+https://fastapi.tiangolo.com/tutorial/query-params-str-validations/#add-regular-expressions
+
+from typing import Annotated
+from fastapi import FastAPI, Query
+app = FastAPI()
+
+@app.get("/items/")
+async def read_items( 
+    q: Annotated[ str | None, Query(min_length=3, max_length=50, pattern="^fixedquery$") ] = None,
+):
+
+# important features: 
+- create primary key in db, return key to user calling api?
+- api call to init db, clear db?

@@ -1,0 +1,14 @@
+
+
+###
+POST http://127.0.0.1:8000/order/ HTTP/1.1
+content-type: application/json
+
+{
+    "order_id": "",
+    "shopper_id": "65ac5dbe-d809-4fbd-b853-57971e88a718",
+    "cart_id": "3e814d3a-289d-484b-980d-9f3355ccb5df",
+    "price_cents": 1482
+}
+###
+GET http://127.0.0.1:8000/order-totals/asdf HTTP/1.1
