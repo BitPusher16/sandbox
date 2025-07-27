@@ -1,4 +1,4 @@
-# This error appears if the pong.c file is not found.
+# This error appears if the pong.c file is not found:
 # make: *** No rule to make target 'src/pong.c', needed by 'pong'.  Stop.
 #
 # https://www.gnu.org/software/make/manual/html_node/Phony-Targets.html
@@ -8,6 +8,7 @@
 
 # ========
 
+# if user provides no argument to make, make runs the first target in the file.
 .PHONY: run
 run: pong
 	./pong
