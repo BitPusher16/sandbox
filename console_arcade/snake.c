@@ -79,7 +79,7 @@ int main(int argc, char** argv){
 	}
 
 	// restore terminal echo
-	sleep(1);
+	sleep(1); // give time for user to release 'q' key;
 	tcsetattr(STDIN_FILENO, TCSANOW, &term_prev);
 
 	// ??
@@ -95,7 +95,7 @@ int main(int argc, char** argv){
 	//}
 	
 	//fflush(stdin);
-	tcflush(STDIN_FILENO, TCIFLUSH);
+	tcflush(STDIN_FILENO, TCIFLUSH); // this is required to prevent writing of keys at program exit.
 	
 	return 0;
 }
