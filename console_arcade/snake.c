@@ -65,7 +65,8 @@ int main(int argc, char** argv){
 			if(char_curr != KEY_LIST_NONE){
 				//printf("%c\n", c);
 				//printf("\r\033[K"); // clear line
-				printf(ERASE_LINE);
+
+				//printf(ERASE_LINE);
 				printf("%s %ld\n", crokey_enum_to_string(char_curr), (long)time_curr);
 			}
 		}
@@ -79,7 +80,8 @@ int main(int argc, char** argv){
 	}
 
 	// restore terminal echo
-	sleep(1); // give time for user to release 'q' key;
+	//sleep(1); // give time for user to release 'q' key;
+	tcflush(STDIN_FILENO, TCIFLUSH);
 	tcsetattr(STDIN_FILENO, TCSANOW, &term_prev);
 
 	// ??
@@ -96,6 +98,8 @@ int main(int argc, char** argv){
 	
 	//fflush(stdin);
 	tcflush(STDIN_FILENO, TCIFLUSH); // this is required to prevent writing of keys at program exit.
+	printf("[press return to exit]\n");
+	getchar();
 	
 	return 0;
 }
