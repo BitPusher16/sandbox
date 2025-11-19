@@ -5,9 +5,19 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <X11/Xlib.h>
+
 #define ERASE_LINE "\033[2K\r"
 
+struct termios term_prev;
+
+void disable_no_echo_mode(void){
+	tcsetattr(STDIN_FILENO, TCSAFLUSH, &term_prev);
+}
+
 int main(int argc, char** argv){
+
+	atexit(disable_no_echo_mode);
 
 	//struct termios orig_termios;
 
@@ -41,7 +51,8 @@ int main(int argc, char** argv){
 	//freopen("/dev/null", "r", stdin);
 	
 	// disable terminal echo.
-	struct termios term_curr, term_prev;
+	//struct termios term_curr, term_prev;
+	struct termios term_curr;
 	tcgetattr(STDIN_FILENO, &term_prev);
 	term_curr = term_prev;
 	//term_curr.c_lflag &= ~ECHO;
@@ -79,10 +90,15 @@ int main(int argc, char** argv){
 
 	}
 
+	// wait until key is released.
+	while(crokey_get_pressed_key() != KEY_LIST_NONE){
+		// wait
+	}
+
 	// restore terminal echo
 	//sleep(1); // give time for user to release 'q' key;
-	tcflush(STDIN_FILENO, TCIFLUSH);
-	tcsetattr(STDIN_FILENO, TCSANOW, &term_prev);
+	//tcflush(STDIN_FILENO, TCIFLUSH);
+	//tcsetattr(STDIN_FILENO, TCSANOW, &term_prev);
 
 	// ??
 	//scanf("%*[^\n]");
@@ -96,10 +112,12 @@ int main(int argc, char** argv){
 	//	write(STDOUT_FILENO, "\b \b", 3);
 	//}
 	
+	tcsetattr(STDIN_FILENO, TCSANOW, &term_prev);
+	//tcflush(STDIN_FILENO, TCIFLUSH); // this is required to prevent writing of keys at program exit.
+	//tcflush(STDIN_FILENO, TCSAFLUSH); // this is required to prevent writing of keys at program exit.
 	//fflush(stdin);
-	tcflush(STDIN_FILENO, TCIFLUSH); // this is required to prevent writing of keys at program exit.
-	printf("[press return to exit]\n");
-	getchar();
+	//getchar();
+	//printf("[press return to exit]\n");
 	
 	return 0;
 }
