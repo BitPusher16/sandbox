@@ -2,6 +2,7 @@
 
 gcc snake.c -lX11
 
-
-
 https://www.reddit.com/r/C_Programming/comments/v5k3z1/reading_char_for_char_from_stdin_without_waiting/
+
+this person recommended using getchar() (linux only?)
+https://stackoverflow.com/questions/7469139/what-is-the-equivalent-to-getch-getche-in-linux

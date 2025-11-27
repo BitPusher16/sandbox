@@ -17,11 +17,17 @@ int main(int argc, char** argv){
 	//term_edit.c_cc[VTIME] = 0;
 	//tcsetattr(STDIN_FILENO, TCSANOW, &term_edit);
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &term_edit);
+
+	//char c = getchar();
+	//printf("--\n");
+	//c = getchar();
 	
 	time_t time_curr;
 	char char_prev = KEY_LIST_NONE;
 	char char_curr = '\n';
 	while(1){
+		char discard = getchar(); // this 
+		printf("captured with getchar: %c\n", discard);
 		time_curr = time(NULL);
 		char_curr = crokey_get_pressed_key();
 
