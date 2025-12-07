@@ -445,6 +445,7 @@ reps=(
 
 	'\xe2\x96\x80'
 	'\xe2\x96\x84'
+	'\xe2\x96\x88'
 
 	# TODO: investigate unicode "Geometric Shapes"
 
@@ -461,7 +462,8 @@ reps=(
 #for i in {0..255}
 #for i in {0..257}
 #for i in {0..440}
-for i in {0..442}
+#for i in {0..442}
+for i in {0..443}
 do
   printf '%b' "${reps[$i]}"
   if (( (i + 1) % 16 == 0 )); then
