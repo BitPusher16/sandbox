@@ -14,18 +14,15 @@
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #endif
 
+// clamp inclusive.
 #ifndef CLAMP
-/**
- * CLAMP: Clamps a value 'v' between a lower bound 'l' and an upper bound 'h' (inclusive).
- * The result will be at least 'l', and at most 'h'.
- */
 #define CLAMP(v, l, h) MIN((h), MAX((v), (l)))
 #endif
 
 
 int main(int argc, char** argv){
 
-	// disable terminal canonical mode (input newline termination) and echo.
+	// disable terminal canonical mode (terminate input on newline) and echo.
 	struct termios term_edit, term_orig;
 	tcgetattr(STDIN_FILENO, &term_orig);
 	term_edit = term_orig;
