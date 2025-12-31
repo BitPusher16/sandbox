@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <termios.h>
 #include <unistd.h>
@@ -83,6 +84,10 @@ int main(int argc, char** argv){
 	//int tail_j = 2;
 	direction curr = RT;
 
+	int apple_i = 2;
+	int apple_j = 8;
+	board[apple_i][apple_j] = 1;
+
 	// user can change address in const char *,
 	// but user cannot use const char * to change values at address.
 	const char *upper = "\xe2\x96\x80";
@@ -92,10 +97,14 @@ int main(int argc, char** argv){
 
 	char out[num_rows * num_cols + 1024];
 	int out_idx;
+	
+	srand(time(NULL));
 
 	time_t time_curr;
 	int char_curr = '\0';
 	int collision = 0;
+	int score = 0;
+	int* flat_board = (int*)board;
 	while(1){
 
 		time_curr = time(NULL);
@@ -103,7 +112,7 @@ int main(int argc, char** argv){
 		// capture input.
 		char_curr = crokey_get_pressed_key();
 
-		curr = NL; // null. comment out to play progressive.
+		//curr = NL; // null. comment out to play progressive.
 		if(char_curr == KEY_S){ curr = DN; } // down
 		if(char_curr == KEY_W){ curr = UP; } // up
 		if(char_curr == KEY_A){ curr = LT; } // left
@@ -120,10 +129,32 @@ int main(int argc, char** argv){
 		player_i = CLAMP(player_i, 0, num_rows-1);
 		player_j = CLAMP(player_j, 0, num_cols-1);
 
-		if(player_i != snake[snake_end].i || player_j != snake[snake_end].j){
+		// require no collision because game input should be ignored if a collision has happened.
+		// require player position changed in case we are playing static and player has not moved.
+		if(!collision && (player_i != snake[snake_end].i || player_j != snake[snake_end].j)){
+			// generate apples?
+			if(apple_i == -1){
+				int rand_k = (rand() % m_n);
+				while(flat_board[rand_k] == 1){ 
+					rand_k += 1; 
+					rand_k %= m_n;
+				}
+				flat_board[rand_k] = 1;
+				apple_i = rand_k / num_rows;
+				apple_j = rand_k % num_rows;
+			}
+
 			// check for collisions here.
 			if(board[player_i][player_j] == 1){
-				collision = 1;
+				if(player_i == apple_i && player_j == apple_j){
+				}
+				else{
+					collision = 1;
+					// continue here to prevent deletion of last snake element.
+					// fine to skip the render phase this pass.
+					// game over and final score will be drawn next pass.
+					//continue; 
+				}
 			}
 
 			// add next snake element.
@@ -134,9 +165,22 @@ int main(int argc, char** argv){
 			board[snake[snake_end].i][snake[snake_end].j] = 1;
 
 			// remove last snake element.
-			board[snake[snake_beg].i][snake[snake_beg].j] = 0;
-			snake_beg += 1;
-			snake_beg %= m_n;
+			// todo: move this to before collision logic, add element logic.
+			// that way, the end of the tail moves out of the way
+			// before collisions are detected or new snake head element is drawn.
+			//
+			// if player has eaten an apple this loop,
+			// do not remove last snake element.
+			if(player_i == apple_i && player_j == apple_j){
+				score += 1;
+				apple_i = -1;
+				apple_j = -1;
+			}
+			else{
+				board[snake[snake_beg].i][snake[snake_beg].j] = 0;
+				snake_beg += 1;
+				snake_beg %= m_n;
+			}
 		}
 
 		//if(curr != NL){
@@ -205,14 +249,15 @@ int main(int argc, char** argv){
 		printf("%s\n", out);
 
 		if(!collision){
-			printf("SCORE: %d  GAME_ACTIVE\n");
+			printf("SCORE: %08d  GAME_ACTIVE\n", score);
 		}
 		else{
-			printf("SCORE: %d  GAME_OVER\n");
+			printf("SCORE: %08d  GAME_OVER\n", score);
 		}
 
 		// print some debug info.
 		printf("%s %ld\n", crokey_enum_to_string(char_curr), (long)time_curr);
+		printf("Q TO QUIT\n");
 
 		if(char_curr == KEY_Q){
 			break;
