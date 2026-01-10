@@ -117,7 +117,7 @@ int main(int argc, char** argv){
 	while(1){
 
 		time_curr = time(NULL);
-		//ioctl(STDOUT_FILENO, TIOCGWINSZ, &w); // ??
+		//ioctl(STDOUT_FILENO, TIOCGWINSZ, &w); // TODO: check window size for changes.
 
 		// capture input.
 		char_curr = crokey_get_pressed_key();
