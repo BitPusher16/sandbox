@@ -7,6 +7,8 @@ OBJECTS = $(SOURCES:.c=.o)
 
 all: run
 
+build: $(TARGET)
+
 run: $(TARGET)
 	./$(TARGET)
 
@@ -20,4 +22,3 @@ $(TARGET): $(OBJECTS)
 
 clean:
 	rm -f $(TARGET) $(OBJECTS)
-
