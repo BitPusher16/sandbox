@@ -10,6 +10,8 @@ all: run
 run: $(TARGET)
 	./$(TARGET)
 
+build: $(TARGET)
+
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) -o $@
 

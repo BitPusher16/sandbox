@@ -2,6 +2,7 @@
 #include <time.h>
 #include <termios.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 #define CROKEY_IMPL
 #include "crokey.h"
@@ -34,6 +35,8 @@ int main(int argc, char** argv){
 	term_edit.c_cc[VTIME] = 0;
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &term_edit);
 
+	
+
 	// hide cursor;
 	printf("\e[?25l");
 
@@ -57,12 +60,19 @@ int main(int argc, char** argv){
 	int player_i = 1;
 	int player_j = 1;
 
+	//struct winsize w;
+	//ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+	//printf("Rows: %d\n", w.ws_row);
+	//printf("Columns: %d\n", w.ws_col);
+
+	struct winsize w;
 	time_t time_curr;
 	//char char_prev = KEY_LIST_NONE;
 	int char_curr = '\0';
 	while(1){
 
 		time_curr = time(NULL);
+		ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
 		char_curr = crokey_get_pressed_key();
 
 		if(char_curr == KEY_J){ player_i += 1; }
@@ -129,15 +139,19 @@ int main(int argc, char** argv){
 		//		printf("%s %ld\n", crokey_enum_to_string(char_curr), (long)time_curr);
 		//	}
 		//}
-		printf("%s %ld\n", crokey_enum_to_string(char_curr), (long)time_curr);
-		
+
+		printf(
+			"rows:%d cols:%d %s %ld\n", 
+			w.ws_row, w.ws_col,
+			crokey_enum_to_string(char_curr), (long)time_curr
+		);
 
 		if(char_curr == KEY_Q){
 			break;
 		}
+
 		//sleep(1);
 		usleep(50 * 1000);
-		//sleep(1);
 	}
 
 	// wait until quit key is released.
