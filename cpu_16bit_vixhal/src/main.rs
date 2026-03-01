@@ -88,11 +88,8 @@ fn ENCODE_JMP   (op: Opcode, address: u16) -> u16 {
 }
 
 fn mem_read16(cpu: & Cpu, address: u16) -> u16{
-    //println!("in read16, about to read");
     let low: u16 = cpu.memory[address as usize] as u16;
-    //println!("in read16, read low {} from address {}", low, address);
     let high: u16 = cpu.memory[(address + 1) as usize] as u16;
-    //println!("in read16, read high {} from address {}", high, address+1);
     (high << 8) | low
 }
 
@@ -148,15 +145,8 @@ fn cpu_step(cpu: &mut Cpu){
     match(opcode){
         Opcode::OP_NOP => {},
         Opcode::OP_LOAD => {
-            //println!("loading val {} into dst {}", mem_read16(cpu, cpu.pc), dst);
             cpu.registers[dst as usize] = mem_read16(cpu, cpu.pc);
-            //println!("in LOAD, about to read16");
-            //let x = mem_read16(cpu, cpu.pc);
-            //println!("loading val {} into dst {}", x, dst);
-            //println!("in LOAD, just read 16");
-            //cpu.registers[dst as usize] = x;
             cpu.pc += 2;
-            //println!("in LOAD, incremented program counter");
         },
         Opcode::OP_MOV => {
             cpu.registers[dst as usize] = cpu.registers[src as usize];
@@ -236,7 +226,6 @@ fn cpu_step(cpu: &mut Cpu){
         },
         Opcode::OP_HALT => {
             cpu.halted = true;
-            //println!("worker went home after tasks: {}", cpu.cycles);
         },
     }
     cpu.cycles += 1;
@@ -247,8 +236,6 @@ fn cpu_run(cpu: &mut Cpu){
         cpu_step(cpu);
     }
 }
-
-//use std::collections::HashMap;
 
 //#[derive(Debug, Clone)]
 pub struct Label {
@@ -279,7 +266,7 @@ fn parse_immediate(s: &str) -> u16 {
 
 fn assemble(source: &str, max_words: usize) -> Vec<u16> {
     let mut labels: Vec<Label> = Vec::new();
-    let mut output: Vec<u16> = Vec::new(); // should be vec u8?
+    let mut output: Vec<u16> = Vec::new();
 
     // PASS 1: record label positions
     let mut addr: u16 = 0;
@@ -307,7 +294,6 @@ fn assemble(source: &str, max_words: usize) -> Vec<u16> {
 
     // PASS 2: emit instructions
     for line in source.lines() {
-        println!("assembling line: {}", line);
         if output.len() >= max_words {
             break;
         }
@@ -449,20 +435,23 @@ fn main() {
         HALT\n\
     ";
 
+    println!("=== Program: ===");
     print!("{}\n", program);
 
     //let mut machine_code: Vec<u16> = Vec::new();
     let machine_code = assemble(program, 512);
 
-    println!("Task forms (machine code):");
+    println!("=== Task forms (machine code): ===");
     for (i, &word) in machine_code.iter().enumerate() {
         println!("Word [{:02}] @ 0x{:04X}: 0x{:04X}", i, i * 2, word);
     }
+    println!("");
 
     load_program(&mut cpu, machine_code);
     println!("=== Worker starts... ===");
     cpu_run(&mut cpu);
     cpu_dump(&mut cpu);
+    println!("");
 
     println!("=== VERIFICATION ===");
     println!("R0 (register) = {} {}", cpu.registers[0], cpu.registers[0] == 5050);
