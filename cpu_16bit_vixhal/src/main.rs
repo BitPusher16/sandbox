@@ -79,7 +79,7 @@ fn DECODE_SRC   (instr: u16) -> u16 { (instr >>  5) & 0x07 }
 fn DECODE_IMM5  (instr: u16) -> u16 { instr & 0x01F }
 fn DECODE_ADDR  (instr: u16) -> u16 { instr & 0x7FF }
 
-fn ENCODE_REG   (op: Opcode, dst: u8, src: u8, imm5: u8) -> u16 {
+fn ENCODE_REG   (op: Opcode, dst: u16, src: u16, imm5: u16) -> u16 {
     ((op as u16 & 0x1F) << 11) | ((dst as u16 & 0x7) << 8) | ((src as u16 & 0x7) << 5) | (imm5 as u16 & 0x1F)
 }
 
@@ -88,8 +88,11 @@ fn ENCODE_JMP   (op: Opcode, address: u16) -> u16 {
 }
 
 fn mem_read16(cpu: & Cpu, address: u16) -> u16{
+    //println!("in read16, about to read");
     let low: u16 = cpu.memory[address as usize] as u16;
-    let high: u16 = cpu.memory[address as usize + 1] as u16;
+    //println!("in read16, read low {} from address {}", low, address);
+    let high: u16 = cpu.memory[(address + 1) as usize] as u16;
+    //println!("in read16, read high {} from address {}", high, address+1);
     (high << 8) | low
 }
 
@@ -145,8 +148,15 @@ fn cpu_step(cpu: &mut Cpu){
     match(opcode){
         Opcode::OP_NOP => {},
         Opcode::OP_LOAD => {
+            //println!("loading val {} into dst {}", mem_read16(cpu, cpu.pc), dst);
             cpu.registers[dst as usize] = mem_read16(cpu, cpu.pc);
+            //println!("in LOAD, about to read16");
+            //let x = mem_read16(cpu, cpu.pc);
+            //println!("loading val {} into dst {}", x, dst);
+            //println!("in LOAD, just read 16");
+            //cpu.registers[dst as usize] = x;
             cpu.pc += 2;
+            //println!("in LOAD, incremented program counter");
         },
         Opcode::OP_MOV => {
             cpu.registers[dst as usize] = cpu.registers[src as usize];
@@ -226,7 +236,7 @@ fn cpu_step(cpu: &mut Cpu){
         },
         Opcode::OP_HALT => {
             cpu.halted = true;
-            println!("worker went home after tasks: {}", cpu.cycles);
+            //println!("worker went home after tasks: {}", cpu.cycles);
         },
     }
     cpu.cycles += 1;
@@ -246,7 +256,7 @@ pub struct Label {
     pub address: u16,
 }
 
-fn parse_register(s: &str) -> u8 {
+fn parse_register(s: &str) -> u16 {
     let s = s.trim_start_matches([' ', '\t']);
     let s = s.splitn(2, ',').next().unwrap_or("").trim_end();
     let s = &s[..s.len().min(15)];
@@ -256,15 +266,15 @@ fn parse_register(s: &str) -> u8 {
         && bytes[1].is_ascii_digit()
         && (bytes[1] - b'0') <= 7
     {
-        (bytes[1] - b'0') as u8
+        (bytes[1] - b'0') as u16
     } else {
-        255
+        65535
     }
 }
 
-fn parse_immediate(s: &str) -> u8 {
+fn parse_immediate(s: &str) -> u16 {
     let s = s.trim_start_matches([' ', '\t']);
-    s.parse::<u8>().unwrap_or(0)
+    s.parse::<u16>().unwrap_or(0)
 }
 
 fn assemble(source: &str, max_words: usize) -> Vec<u16> {
@@ -297,6 +307,7 @@ fn assemble(source: &str, max_words: usize) -> Vec<u16> {
 
     // PASS 2: emit instructions
     for line in source.lines() {
+        println!("assembling line: {}", line);
         if output.len() >= max_words {
             break;
         }
@@ -415,8 +426,7 @@ fn main() {
         LOAD R1, 100\n\
         LOAD R2, 1\n\
         LOAD R3, 0\n\
-        ;LOAD R4, 1000; bug: loading 1000 into R4 loads nothing.\n\
-        LOAD R4, 10\n\
+        LOAD R4, 1000\n\
         loop:\n\
         ADD R0, R1\n\
         SUB R1, R2\n\
@@ -427,6 +437,15 @@ fn main() {
         LOAD R0, 0\n\
         POP R0\n\
         LDR R5, R4\n\
+        HALT\n\
+    ";
+
+    let program3 = "\
+        LOAD R0, 0\n\
+        LOAD R1, 100\n\
+        LOAD R2, 1\n\
+        LOAD R3, 0\n\
+        LOAD R4, 1000\n\
         HALT\n\
     ";
 
@@ -447,10 +466,10 @@ fn main() {
 
     println!("=== VERIFICATION ===");
     println!("R0 (register) = {} {}", cpu.registers[0], cpu.registers[0] == 5050);
-    println!("R4 (register) = {} {}", cpu.registers[4], cpu.registers[4] == 10);
+    println!("R4 (register) = {} {}", cpu.registers[4], cpu.registers[4] == 1000);
     println!("R5 (register) = {} {}", cpu.registers[5], cpu.registers[5] == 5050);
-    let mem_result = mem_read16(&cpu, 10);
-    println!("Memory[10]    = {} {}", mem_result, mem_result == 5050);
+    let mem_result = mem_read16(&cpu, 1000);
+    println!("Memory[1000]  = {} {}", mem_result, mem_result == 5050);
 
 }
 
