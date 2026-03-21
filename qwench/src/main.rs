@@ -23,6 +23,21 @@ fn main() -> io::Result<()> {
 
     let mut buffer: Vec<(char, Option<Color>)> = vec![];
 
+    buffer.push(('H', Some(Color::Red)));
+    buffer.push(('e', None));
+    buffer.push(('l', None));
+    buffer.push(('l', None));
+    buffer.push(('o', Some(Color::Green)));
+    buffer.push((' ', None));
+    buffer.push(('W', Some(Color::Blue)));
+    buffer.push(('o', None));
+    buffer.push(('r', Some(Color::Yellow)));
+    buffer.push(('l', None));
+    buffer.push(('d', Some(Color::Magenta)));
+    buffer.push(('!', None));
+    buffer.push(('\r', None));
+    buffer.push(('\n', None));
+
     let mut stdout = io::stdout();
     let tick_ms = Duration::from_millis(200);
     let time_beg = Instant::now();
@@ -45,22 +60,6 @@ fn main() -> io::Result<()> {
             print!("drawing...\r\n");
 
             execute!(stdout, Clear(ClearType::All), MoveTo(0,0))?;
-            
-            buffer.push(('H', Some(Color::Red)));
-            buffer.push(('e', None));
-            buffer.push(('l', None));
-            buffer.push(('l', None));
-            buffer.push(('o', Some(Color::Green)));
-            buffer.push((' ', None));
-            buffer.push(('W', Some(Color::Blue)));
-            buffer.push(('o', None));
-            buffer.push(('r', Some(Color::Yellow)));
-            buffer.push(('l', None));
-            buffer.push(('d', Some(Color::Magenta)));
-            buffer.push(('!', None));
-            buffer.push(('\r', None));
-            buffer.push(('\n', None));
-
             
             for (ch, maybe_color) in &buffer {
                 if let Some(color) = maybe_color {
