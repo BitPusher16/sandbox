@@ -5,3 +5,9 @@ edition = "2024"
 
 [dependencies]
 crossterm = "0.29.0"
+
+[profile.dev]
+panic = 'abort'
+
+[profile.release]
+panic = 'abort'
