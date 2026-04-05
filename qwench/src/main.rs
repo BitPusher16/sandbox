@@ -13,50 +13,10 @@ use crossterm::terminal::{
     LeaveAlternateScreen, DisableLineWrap, EnableLineWrap, Clear, ClearType,
 };
 
-// there are 176-32=144 printable ascii chars not counting space.
-// show statistics after every game.
-// support a flag that allows appending single game statistics to file.
-
 const MIN_COLS: usize = 144;
 const MIN_ROWS: usize = 48;
 
-#[derive(Clone, Copy, Debug)]
-enum GridCellRef {
-    Raindrop(usize), // in addition to the object, store an array index.
-    Cloud(usize),
-}
-
-// a copy of a grid cell which Game may pass to an object about to update.
-enum GridCellSnapshot{
-    // renamed Randrop to Rd just to remind that enum names don't
-    // have to correspond to objects.
-    Rd(Raindrop),
-    Cd(Cloud),
-}
-
-struct CardinalCells {
-    n: Option<GridCellSnapshot>,
-    s: Option<GridCellSnapshot>,
-    e: Option<GridCellSnapshot>,
-    w: Option<GridCellSnapshot>,
-}
-
-impl CardinalCells {
-    fn iter(&self) -> impl Iterator<Item = &GridCellSnapshot> {
-        [&self.n, &self.s, &self.e, &self.w]
-            .into_iter()
-            .flatten()
-    }
-}
-
-// game pieces that update themselves should return this to 
-// the Game object if they want to be relocated.
-struct UpdateResult<T> {
-    object: T,
-    move_to: Option<(usize, usize)>,
-}
-
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 struct CanvasCell {
     ch: char,
     fg: Color,
@@ -64,107 +24,213 @@ struct CanvasCell {
 }
 
 impl Default for CanvasCell{
-    fn default() -> Self{
+    fn default() -> Self {
         Self {ch:'.', fg:Color::Blue, bg:Color::Black}
     }
 }
 
+//#[derive(Debug)]
+//struct Canvas {
+//    canvas: Vec<Vec<CanvasCell>>,
+//}
+
+type Canvas = Vec<Vec<CanvasCell>>;
+
+//#[derive(Debug)]
+//struct Sprite{
+//    cells: Vec<Vec<CanvasCell>>,
+//}
+
 type Sprite = Vec<Vec<CanvasCell>>;
 
-fn make_sprite(rows: &[&[(char, Color, Color)]]) -> Sprite {
-    rows.iter().map(|row| {
-        row.iter().map(|&(ch, fg, bg)| {
-            CanvasCell { ch, fg, bg }
-        }).collect()
-    }).collect()
+fn draw_onto(
+    a: &mut Vec<Vec<CanvasCell>>,
+    //b: Vec<Vec<CanvasCell>>,
+    b: Sprite,
+    start_row: usize,
+    start_col: usize,
+) {
+    let a_height = a.len();
+    if a_height == 0 || b.is_empty() {
+        return;
+    }
+
+    for (i, b_row) in b.iter().enumerate() {
+        let target_row = start_row + i;
+        if target_row >= a_height {
+            break;
+        }
+
+        let a_row = &mut a[target_row];
+
+        for (j, &cell) in b_row.iter().enumerate() {
+            let target_col = start_col + j;
+            if target_col >= a_row.len() {
+                break;
+            }
+            a_row[target_col] = cell;
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
+// call like:
+//   let sprite = string_to_sprite(r#"
+//       xbr $br zgr,
+//       cbr xbr xbr,
+//       xbr $br zgr,
+//   "#);
+fn string_to_sprite(input: &str) -> Sprite {
+    fn char_to_color(c: char) -> Color {
+        match c.to_ascii_lowercase() {
+            'E' => Color::DarkGrey,
+            'r' => Color::Red,
+            'g' => Color::Green,
+            'y' => Color::Yellow,
+            'b' => Color::Blue,
+            'm' => Color::Magenta,
+            'c' => Color::Cyan,
+            'w' => Color::White,
+            'k' => Color::Black,
+            'R' => Color::DarkRed,
+            'G' => Color::DarkGreen,
+            'Y' => Color::DarkYellow,
+            'B' => Color::DarkBlue,
+            'M' => Color::DarkMagenta,
+            'C' => Color::DarkCyan,
+            'e' => Color::Grey,
+            _ => Color::Reset,
+        }
+    }
+
+    let mut cells: Vec<Vec<CanvasCell>> = Vec::new();
+    let cleaned: String = input.chars().filter(|c| !c.is_whitespace()).collect();
+    for row_str in cleaned.split(',') {
+        if row_str.is_empty() { continue; }
+        let chars: Vec<char> = row_str.chars().collect();
+        let mut row = Vec::new();
+        for i in (0..chars.len()).step_by(3) {
+            if i + 2 >= chars.len() { break; }
+            let ch = chars[i];
+            let fg = char_to_color(chars[i + 1]);
+            let bg = char_to_color(chars[i + 2]);
+            row.push(CanvasCell { ch, fg, bg });
+        }
+        if !row.is_empty() { cells.push(row); }
+    }
+    //Sprite { cells }
+    cells
+}
+
+#[derive(Debug, Copy, Clone)]
 struct Raindrop { r: usize, c: usize, anim_state: i32, delete: bool }
 
-#[derive(Debug, Clone)]
-struct Cloud { r: usize, c: usize, density: i32, delete: bool }
+#[derive(Debug, Copy, Clone)]
+struct Cloud { r: usize, c: usize, anim_state: i32, delete: bool }
 
 impl Raindrop {
     fn get_sprite(&self) -> Sprite {
-        let fg = Color::Red;
-        let bg = Color::Black;
-        make_sprite(&[
-            &[('F', fg, bg), ('#', fg, bg), ('#', fg, bg)],
-            &[('#', fg, bg), ('F', fg, bg), ('#', fg, bg)],
-            &[('#', fg, bg), ('#', fg, bg), ('F', fg, bg)],
-        ])
+        match self.anim_state {
+            0 => string_to_sprite(r#"
+                Owb Xwb Owb,
+                Owb Orb Owb,
+                Owb Orb Owb,
+            "#),
+            1 => string_to_sprite(r#"
+                Owb Owb Owb,
+                Owb Orb Owb,
+                Owb Xwb Owb
+            "#),
+            _ => string_to_sprite(r#"Owb"#),
+        }
     }
 
-
-    fn update(mut self, cardinal: &CardinalCells) -> UpdateResult<Raindrop> {
-        let mut move_to = None;
-
-        for contents in cardinal.iter() {
-            match contents {
-                GridCellSnapshot::Rd(b) => {
-                    self.anim_state -= b.anim_state as i32;
-                    // move away from an adjacent Bar by stepping south
-                    move_to = Some((self.c, self.r + 1));
-                }
-                GridCellSnapshot::Cd(f) => {
-                    self.anim_state += f.density / 10;
-                }
-            }
+    fn update(&mut self) {
+        self.anim_state = match self.anim_state {
+            0 => 1,
+            1 => 0,
+            _ => self.anim_state
         }
-
-        if self.anim_state <= 0 {
-            self.delete = true;
-        }
-
-        UpdateResult { object: self, move_to }
     }
 }
 
 impl Cloud {
     fn get_sprite(&self) -> Sprite {
-        let fg = Color::Green;
-        let bg = Color::Black;
-        make_sprite(&[
-            &[('B', fg, bg), ('B', fg, bg), ('B', fg, bg)],
-            &[('B', fg, bg), ('.', fg, bg), ('B', fg, bg)],
-            &[('B', fg, bg), ('B', fg, bg), ('B', fg, bg)],
-        ])
+        match self.anim_state {
+            0 => string_to_sprite(r#"
+                vbw vbw vbw,
+                vbw vbw vbw
+            "#),
+            1 => string_to_sprite(r#"
+                ^bw ^bw ^bw,
+                ^bw ^bw ^bw
+            "#),
+            _ => string_to_sprite(r#"-bw"#),
+        }
     }
 
-    fn update(mut self, cardinal: &CardinalCells) -> UpdateResult<Cloud> {
-        let mut move_to = None;
-
-        for contents in cardinal.iter() {
-            match contents {
-                GridCellSnapshot::Rd(_) => {
-                    self.density += 2;
-                    // chase adjacent Foo by stepping east
-                    move_to = Some((self.c + 1, self.r));
-                }
-                GridCellSnapshot::Cd(b) => {
-                    self.density += b.density * 2;
-                }
-            }
+    fn update(&mut self) {
+        self.anim_state = match self.anim_state {
+            0 => 1,
+            1 => 0,
+            _ => self.anim_state
         }
-
-        if self.density > 10 {
-            self.delete = true;
-        }
-
-        UpdateResult { object: self, move_to }
     }
+}
 
+#[derive(Debug, Copy, Clone)]
+enum GridCell {
+    Rd(Raindrop),
+    Cd(Cloud),
+}
+
+trait GetSprite {
+    fn get_sprite(&self) -> Sprite;
+}
+
+// implementing a trait on an enum allows us to do things like this:
+//
+//    // Build a mixed collection
+//    let mixed: Vec<Thing> = vec![
+//        Thing::Foo(Foo),
+//        Thing::Bar(Bar),
+//        Thing::Foo(Foo),
+//        Thing::Bar(Bar),
+//    ];
+//
+//    // Option A – static dispatch, but no extra helper needed
+//    for item in &mixed {
+//        item.bif();
+//        println!("{:?}", item);
+//    }
+impl GetSprite for GridCell {
+    fn get_sprite(&self) -> Sprite {
+        match self {
+            GridCell::Rd(rd) => rd.get_sprite(),
+            GridCell::Cd(cd) => cd.get_sprite(),
+        }
+    }
+}
+
+trait Update {
+    fn update(&mut self);
+}
+
+impl Update for GridCell {
+    fn update(&mut self) {
+        match self {
+            GridCell::Rd(rd) => rd.update(),
+            GridCell::Cd(cd) => cd.update(),
+        }
+    }
 }
 
 struct Game {
     r: usize,
     c: usize,
     out: Box<dyn Write>,
-    grid: Vec<Vec<Option<GridCellRef>>>,
+    grid: Vec<Vec<Option<GridCell>>>,
     canvas: Vec<Vec<CanvasCell>>,
-    raindrops: Vec<Raindrop>,
-    clouds: Vec<Cloud>,
+    elts_updated: u32,
 }
 
 impl Game{
@@ -175,62 +241,36 @@ impl Game{
             out,
             grid: vec![vec![None; c]; r],
             canvas: vec![vec![CanvasCell::default(); c]; r],
-            raindrops: Vec::new(),
-            clouds: Vec::new(),
-        }
-    }
-    
-    fn cell_at(&self, x: usize, y: usize) -> Option<GridCellRef> {
-        self.grid[y][x]
-    }
-
-    
-    fn contents_at(&self, x: usize, y: usize) -> Option<GridCellSnapshot> {
-        if x >= self.c || y >= self.r { return None; }
-        match self.grid[y][x] {
-            Some(GridCellRef::Raindrop(i)) => Some(GridCellSnapshot::Rd(self.raindrops[i].clone())),
-            Some(GridCellRef::Cloud(i)) => Some(GridCellSnapshot::Cd(self.clouds[i].clone())),
-            None                  => None,
+            elts_updated: 0,
         }
     }
 
-    fn cardinal_contents(&self, x: usize, y: usize) -> CardinalCells {
-        CardinalCells {
-            n: if y > 0          { self.contents_at(x, y - 1) } else { None },
-            s: if y + 1 < self.r { self.contents_at(x, y + 1) } else { None },
-            e: if x + 1 < self.c { self.contents_at(x + 1, y) } else { None },
-            w: if x > 0          { self.contents_at(x - 1, y) } else { None },
-        }
-    }
-
-    fn blit_sprite(&mut self, x: usize, y: usize, sprite: &Sprite) {
-        for (sy, row) in sprite.iter().enumerate() {
-            for (sx, cell) in row.iter().enumerate() {
-                let cx = x + sx;
-                let cy = y + sy;
-
-                // let '.' character in a sprite represent transparency.
-                if cx < self.c && cy < self.r && cell.ch != '.' {
-                    self.canvas[cy][cx] = *cell;
+    fn update(&mut self) {
+        for i in 0..self.r {
+            for j in 0..self.c {
+                //if let Some(mut elt) = self.grid[i][j] {  // hm, yuck... this makes a copy.
+                if let Some(elt) = &mut self.grid[i][j] {  // works.
+                //if let Some(ref mut elt) = self.grid[i][j] {  // also works.
+                    elt.update(); 
+                    self.elts_updated += 1;
                 }
             }
         }
     }
 
-    fn draw(&mut self) -> Result<()>{
+    fn draw(&mut self) -> Result<()> {
         for row in self.canvas.iter_mut(){
-            row.fill(CanvasCell::default()); // all cells have pointer to same object?
+            row.fill(CanvasCell::default());
         }
 
-        for i in 0..self.raindrops.len() {
-            let (x, y) = (self.raindrops[i].c, self.raindrops[i].r);
-            let sprite = self.raindrops[i].get_sprite();
-            self.blit_sprite(x, y, &sprite);
-        }
-        for i in 0..self.clouds.len() {
-            let (x, y) = (self.clouds[i].c, self.clouds[i].r);
-            let sprite = self.clouds[i].get_sprite();
-            self.blit_sprite(x, y, &sprite);
+        // copy object sprites to canvas.
+        for i in 0..self.r {
+            for j in 0..self.c {
+                if let Some(elt) = self.grid[i][j] { 
+                    let sprite = elt.get_sprite();
+                    draw_onto(&mut self.canvas, sprite, i, j);
+                }
+            }
         }
 
         let (curr_cols, curr_rows) = size()?;
@@ -239,11 +279,12 @@ impl Game{
         if curr_rows < self.r || curr_cols < self.c {
             execute!(self.out, Clear(ClearType::All), MoveTo(0,0))?;
             queue!(self.out, Print(format!(
-                "min terminal dims are {} rows, {} cols, curr dims are {} rows, {} cols.", 
-                MIN_ROWS, MIN_COLS, curr_rows, curr_cols)))?;
+                "game dims set to {} rows, {} cols, current terminal dims are {} rows, {} cols.", 
+                self.r, MIN_COLS, curr_rows, curr_cols)))?;
             self.out.flush()?;
         }
         else{
+            // we will center the game grid in the available terminal space.
             let top_left_r = (curr_rows - self.r) / 2;
             let top_left_c = (curr_cols - self.c) / 2;
 
@@ -275,97 +316,14 @@ impl Game{
             queue!(self.out, EndSynchronizedUpdate)?;
             self.out.flush()?;
         }
-
         Ok(())
-    }
 
-    fn purge_raindrops(&mut self) {
-        self.raindrops.retain(|f| {
-            if f.delete { self.grid[f.r][f.c] = None; }
-            !f.delete
-        });
-        for (i, f) in self.raindrops.iter().enumerate() {
-            self.grid[f.r][f.c] = Some(GridCellRef::Raindrop(i));
-        }
-    }
-
-    fn purge_clouds(&mut self) {
-        self.clouds.retain(|f| {
-            if f.delete { self.grid[f.r][f.c] = None; }
-            !f.delete
-        });
-        for (i, f) in self.clouds.iter().enumerate() {
-            self.grid[f.r][f.c] = Some(GridCellRef::Cloud(i));
-        }
-    }
-
-
-    // Clear whatever is at (nx, ny), then move the object at (old_x, old_y)
-    // into that cell, updating both the grid and the object's coordinates.
-    fn move_object(&mut self, old_x: usize, old_y: usize, nx: usize, ny: usize) {
-        if nx >= self.c || ny >= self.r { return; }
-
-        // evict whatever is currently at the destination
-        match self.grid[ny][nx] {
-            Some(GridCellRef::Raindrop(j)) => { self.raindrops[j].delete = true; }
-            Some(GridCellRef::Cloud(j)) => { self.clouds[j].delete = true; }
-            None => {}
-        }
-        self.grid[ny][nx] = None;
-
-        // move the object from its old cell to the new one
-        let cell_ref = self.grid[old_y][old_x].take();
-        match cell_ref {
-            Some(GridCellRef::Raindrop(i)) => {
-                self.raindrops[i].c = nx;
-                self.raindrops[i].r = ny;
-                self.grid[ny][nx] = Some(GridCellRef::Raindrop(i));
-            }
-            Some(GridCellRef::Cloud(i)) => {
-                self.clouds[i].c = nx;
-                self.clouds[i].r = ny;
-                self.grid[ny][nx] = Some(GridCellRef::Cloud(i));
-            }
-            None => {}
-        }
-    }
-
-
-    fn update_raindrops(&mut self) {
-        for i in 0..self.raindrops.len() {
-            let (x, y)   = (self.raindrops[i].c, self.raindrops[i].r);
-            let cardinal = self.cardinal_contents(x, y);
-            let result   = self.raindrops[i].clone().update(&cardinal);
-            self.raindrops[i] = result.object;
-            if let Some((nx, ny)) = result.move_to {
-                self.move_object(x, y, nx, ny);
-            }
-        }
-    }
-
-    fn update_clouds(&mut self) {
-        for i in 0..self.clouds.len() {
-            let (x, y)   = (self.clouds[i].c, self.clouds[i].r);
-            let cardinal = self.cardinal_contents(x, y);
-            let result   = self.clouds[i].clone().update(&cardinal);
-            self.clouds[i] = result.object;
-            if let Some((nx, ny)) = result.move_to {
-                self.move_object(x, y, nx, ny);
-            }
-        }
-    }
-
-    fn update(&mut self) {
-        self.update_raindrops();
-        self.purge_raindrops();
-
-        self.update_clouds();
-        self.purge_clouds();
     }
 
     fn set_up(&mut self) -> Result<()>{
         enable_raw_mode()?;
         execute!(self.out, EnterAlternateScreen, Hide, DisableLineWrap)?;
+        self.out.flush()?;
         Ok(())
     }
 
@@ -373,83 +331,62 @@ impl Game{
         disable_raw_mode()?;
         execute!(self.out, LeaveAlternateScreen, Show, EnableLineWrap,)?;
         self.out.flush()?;
+        println!("elts updated: {}", self.elts_updated);
+        Ok(())
+    }
+
+    fn game_loop(&mut self) -> Result<()>{
+
+        // add some objects for debugging.
+        self.grid[2][2] = Some(GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false}));
+        self.grid[8][8] = Some(GridCell::Cd(Cloud{r:0, c:0, anim_state:0, delete:false}));
+
+        let tick_ms = Duration::from_millis(200);
+        let time_beg = Instant::now();
+        let mut quit = false;
+        let mut remaining_ms = tick_ms;
+
+        //let mut key_presses = 0;
+
+        while !quit {
+            if event::poll(remaining_ms)? {
+                if let Event::Key(event) = event::read()? {
+                    // \r is required because in raw mode the cursor doesn't automatically return.
+                    print!("Key pressed: {:?}\r\n", event.code);
+                    //key_presses += 1;
+                    if event.code == KeyCode::Char('q') {
+                        quit = true;
+                    }
+                }
+                // as_millis() returns a u128, but from_millis() requires a u64.
+                let rem = tick_ms.as_millis() - (time_beg.elapsed().as_millis() % tick_ms.as_millis());
+                remaining_ms = Duration::from_millis(rem as u64);
+            }
+            else{
+                self.update();
+                self.draw()?;
+
+                let rem = tick_ms.as_millis() - (time_beg.elapsed().as_millis() % tick_ms.as_millis());
+                remaining_ms = Duration::from_millis(rem as u64);
+            }
+        }
+        Ok(())
+    }
+
+    fn run(&mut self) -> Result<()> {
+        self.set_up()?;
+        self.game_loop()?;
+        self.tear_down()?;
         Ok(())
     }
 }
 
 fn main() -> Result<()> {
+    // TODO: parse command line args.
 
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() != 3 {
-        eprintln!("Usage: {} <rows> <cols>", args[0]);
-        std::process::exit(1);
-    }
-    
-    let rows: usize = args[1].parse().expect("first argument (rows) must be a positive integer.");
-    let cols: usize = args[2].parse().expect("second argument (cols) must be a positive integer.");
-
-    if rows < MIN_ROWS { print!("rows must be at least {}.\n", MIN_ROWS); return Ok(()); }
-    if cols < MIN_COLS { print!("cols must be at least {}.\n", MIN_COLS); return Ok(()); }
-
+    let rows = MIN_ROWS;
+    let cols = MIN_COLS;
     let mut game = Game::new(rows, cols, Box::new(io::stdout()));
-
-    game.raindrops.push(Raindrop{r:1, c:1, anim_state:2, delete:false});
-    game.clouds.push(Cloud{r:4, c:4, density:3, delete:false});
-
-    game.set_up()?;
-
-    let tick_ms = Duration::from_millis(200);
-    let time_beg = Instant::now();
-    let mut quit = false;
-    let mut remaining_ms = tick_ms;
-
-    let mut key_presses = 0;
-
-    while !quit {
-        if event::poll(remaining_ms)? {
-            if let Event::Key(event) = event::read()? {
-                // \r is required because in raw mode the cursor doesn't automatically return.
-                print!("Key pressed: {:?}\r\n", event.code);
-                key_presses += 1;
-                if event.code == KeyCode::Char('q') {
-                    quit = true;
-                }
-            }
-            // as_millis() returns a u128, but from_millis() requires a u64.
-            let rem = tick_ms.as_millis() - (time_beg.elapsed().as_millis() % tick_ms.as_millis());
-            remaining_ms = Duration::from_millis(rem as u64);
-        }
-        else{
-            //print!("drawing...\r\n");
-
-            game.update();
-            game.draw()?;
-
-            //let (curr_cols, curr_rows) = size()?;
-            //let curr_cols = curr_cols as usize;
-            //let curr_rows = curr_rows as usize;
-            //if curr_rows < rows || curr_cols < cols {
-            //    execute!(stdout, Clear(ClearType::All), MoveTo(0,0))?;
-            //    queue!(stdout, Print(format!(
-            //        "min terminal dims are {} rows, {} cols, curr dims are {}, {}", 
-            //        MIN_ROWS, MIN_COLS, curr_rows, curr_cols)))?;
-            //    stdout.flush()?;
-            //}
-            //else{
-            //    let top_left_r = (curr_rows - rows) / 2;
-            //    let top_left_c = (curr_cols - cols) / 2;
-            //    draw(&grid, &mut stdout, top_left_r, top_left_c)?;
-            //    //draw(&grid, &mut stdout, top_left_c)?;
-            //}
-
-            let rem = tick_ms.as_millis() - (time_beg.elapsed().as_millis() % tick_ms.as_millis());
-            remaining_ms = Duration::from_millis(rem as u64);
-        }
-    }
-
-    game.tear_down()?;
-    println!("key presses: {}", key_presses);
+    game.run()?;
     Ok(())
 }
-
