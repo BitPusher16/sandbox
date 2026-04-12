@@ -1,6 +1,5 @@
 use std::io;
 use std::io::{Write, Result};
-use std::env;
 use std::time::{Duration, Instant};
 
 use crossterm::{execute, queue};
@@ -44,31 +43,28 @@ type Canvas = Vec<Vec<CanvasCell>>;
 type Sprite = Vec<Vec<CanvasCell>>;
 
 fn draw_onto(
-    a: &mut Vec<Vec<CanvasCell>>,
+    //a: &mut Vec<Vec<CanvasCell>>,
+    canvas: &mut Canvas,
     //b: Vec<Vec<CanvasCell>>,
-    b: Sprite,
+    sprite: Sprite,
     start_row: usize,
     start_col: usize,
 ) {
-    let a_height = a.len();
-    if a_height == 0 || b.is_empty() {
+    let canv_m = canvas.len();
+    if canv_m == 0 || sprite.is_empty() {
         return;
     }
 
-    for (i, b_row) in b.iter().enumerate() {
+    for (i, sprite_row) in sprite.iter().enumerate() {
         let target_row = start_row + i;
-        if target_row >= a_height {
-            break;
-        }
+        if target_row >= canv_m { break; }
 
-        let a_row = &mut a[target_row];
+        let canv_row = &mut canvas[target_row];
 
-        for (j, &cell) in b_row.iter().enumerate() {
+        for (j, &cell) in sprite_row.iter().enumerate() {
             let target_col = start_col + j;
-            if target_col >= a_row.len() {
-                break;
-            }
-            a_row[target_col] = cell;
+            if target_col >= canv_row.len() { break; }
+            canv_row[target_col] = cell;
         }
     }
 }
@@ -102,7 +98,7 @@ fn string_to_sprite(input: &str) -> Sprite {
         }
     }
 
-    let mut cells: Vec<Vec<CanvasCell>> = Vec::new();
+    let mut sprite: Sprite = Vec::new();
     let cleaned: String = input.chars().filter(|c| !c.is_whitespace()).collect();
     for row_str in cleaned.split(',') {
         if row_str.is_empty() { continue; }
@@ -115,10 +111,10 @@ fn string_to_sprite(input: &str) -> Sprite {
             let bg = char_to_color(chars[i + 2]);
             row.push(CanvasCell { ch, fg, bg });
         }
-        if !row.is_empty() { cells.push(row); }
+        if !row.is_empty() { sprite.push(row); }
     }
     //Sprite { cells }
-    cells
+    sprite
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -126,6 +122,9 @@ struct Raindrop { r: usize, c: usize, anim_state: i32, delete: bool }
 
 #[derive(Debug, Copy, Clone)]
 struct Cloud { r: usize, c: usize, anim_state: i32, delete: bool }
+
+#[derive(Debug, Copy, Clone)]
+struct Empty { r: usize, c: usize, anim_state: i32, delete: bool }
 
 impl Raindrop {
     fn get_sprite(&self) -> Sprite {
@@ -177,10 +176,27 @@ impl Cloud {
     }
 }
 
+impl Empty {
+    fn get_sprite(&self) -> Sprite {
+        //string_to_sprite(r#" .bk "#)
+        string_to_sprite(r#""#) // empty string has effect of making draw() do no-op.
+    }
+
+    fn update(&mut self) {
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 enum GridCell {
     Rd(Raindrop),
     Cd(Cloud),
+    Em(Empty),
+}
+
+impl Default for GridCell{
+    fn default() -> Self {
+        GridCell::Em(Empty {r:0, c:0, anim_state:0, delete:false})
+    }
 }
 
 trait GetSprite {
@@ -207,6 +223,7 @@ impl GetSprite for GridCell {
         match self {
             GridCell::Rd(rd) => rd.get_sprite(),
             GridCell::Cd(cd) => cd.get_sprite(),
+            GridCell::Em(em) => em.get_sprite(),
         }
     }
 }
@@ -220,39 +237,79 @@ impl Update for GridCell {
         match self {
             GridCell::Rd(rd) => rd.update(),
             GridCell::Cd(cd) => cd.update(),
+            GridCell::Em(em) => em.update(),
         }
     }
 }
 
 struct Game {
-    r: usize,
-    c: usize,
     out: Box<dyn Write>,
-    grid: Vec<Vec<Option<GridCell>>>,
+    //grid: Vec<Vec<Option<GridCell>>>,
+    grid: Vec<Vec<GridCell>>,
+    //next_grid: Vec<Vec<GridCell>>,
+    update_applied: Vec<Vec<bool>>,
     canvas: Vec<Vec<CanvasCell>>,
     elts_updated: u32,
 }
 
 impl Game{
-    fn new(r: usize, c: usize, out: Box<dyn Write>) -> Self{
+    fn new(m: usize, n: usize, out: Box<dyn Write>) -> Self{
         Game {
-            r,
-            c,
             out,
-            grid: vec![vec![None; c]; r],
-            canvas: vec![vec![CanvasCell::default(); c]; r],
+            //grid: vec![vec![None; n]; m],
+            //grid: vec![vec![GridCell.default(); n]; m],
+            grid: vec![vec![GridCell::default(); n]; m],
+            //next_grid: vec![vec![GridCell::default(); n]; m],
+            update_applied: vec![vec![false; n]; m],
+            canvas: vec![vec![CanvasCell::default(); n]; m],
             elts_updated: 0,
         }
     }
 
     fn update(&mut self) {
-        for i in 0..self.r {
-            for j in 0..self.c {
-                //if let Some(mut elt) = self.grid[i][j] {  // hm, yuck... this makes a copy.
-                if let Some(elt) = &mut self.grid[i][j] {  // works.
-                //if let Some(ref mut elt) = self.grid[i][j] {  // also works.
-                    elt.update(); 
-                    self.elts_updated += 1;
+        for row in &mut self.update_applied { row.fill(false); }
+
+        let (m, n) = (self.grid.len(), self.grid[0].len());
+        for i in 0..m {
+            for j in 0..n {
+                ////if let Some(mut elt) = self.grid[i][j] {  // hm, yuck... this makes a copy.
+                ////if let Some(ref mut elt) = self.grid[i][j] {  // also works.
+                //if let Some(elt) = &mut self.grid[i][j] {  // works.
+                //    elt.update(); 
+                //    self.elts_updated += 1;
+                //}
+
+                // if we have already finalized this cell (possibly while examining previous cell),
+                // do nothing.
+                if self.update_applied[i][j]{ continue; }
+
+                self.update_applied[i][j] = true;
+                self.grid[i][j].update();
+
+                // piece interaction logic.
+                match self.grid[i][j] {
+                    GridCell::Rd(rd) => {
+                        if i + 1 == m{
+                            self.grid[i][j] = GridCell::default();
+                        }
+                        else{
+                            // if raindrop is above cloud, remove it.
+                            if matches!(self.grid[i + 1][j], GridCell::Cd(_)){
+                                self.grid[i][j] = GridCell::default();
+                            }
+                            else{
+                                self.grid[i+1][j] = self.grid[i][j];
+                                self.grid[i][j] = GridCell::default();
+                                // we have moved raindrop into next cell down,
+                                // so we should not update it again.
+                                self.update_applied[i+1][j] = true;
+                            }
+                        }
+                    }
+                    GridCell::Cd(cd) => {
+                    }
+                    GridCell::Em(em) => {
+                    }
                 }
             }
         }
@@ -264,29 +321,32 @@ impl Game{
         }
 
         // copy object sprites to canvas.
-        for i in 0..self.r {
-            for j in 0..self.c {
-                if let Some(elt) = self.grid[i][j] { 
-                    let sprite = elt.get_sprite();
-                    draw_onto(&mut self.canvas, sprite, i, j);
-                }
+        let (m, n) = (self.grid.len(), self.grid[0].len());
+        for i in 0..m {
+            for j in 0..n {
+                //if let Some(elt) = self.grid[i][j] { 
+                //    let sprite = elt.get_sprite();
+                //    draw_onto(&mut self.canvas, sprite, i, j);
+                //}
+                let sprite = self.grid[i][j].get_sprite();
+                draw_onto(&mut self.canvas, sprite, i, j);
             }
         }
 
         let (curr_cols, curr_rows) = size()?;
         let curr_cols = curr_cols as usize;
         let curr_rows = curr_rows as usize;
-        if curr_rows < self.r || curr_cols < self.c {
+        if curr_rows < m || curr_cols < n {
             execute!(self.out, Clear(ClearType::All), MoveTo(0,0))?;
             queue!(self.out, Print(format!(
                 "game dims set to {} rows, {} cols, current terminal dims are {} rows, {} cols.", 
-                self.r, MIN_COLS, curr_rows, curr_cols)))?;
+                m, MIN_COLS, curr_rows, curr_cols)))?;
             self.out.flush()?;
         }
         else{
             // we will center the game grid in the available terminal space.
-            let top_left_r = (curr_rows - self.r) / 2;
-            let top_left_c = (curr_cols - self.c) / 2;
+            let top_left_r = (curr_rows - m) / 2;
+            let top_left_c = (curr_cols - n) / 2;
 
             queue!(self.out, BeginSynchronizedUpdate)?;
             queue!(self.out, Clear(ClearType::All))?;
@@ -295,9 +355,9 @@ impl Game{
             // only print color change chars when necessary.
             let mut last_colors = None;
 
-            for i in 0..self.r {
+            for i in 0..m {
                 queue!(self.out, MoveTo(top_left_c as u16, (top_left_r + i) as u16))?;
-                for j in 0..self.c {
+                for j in 0..n {
                     let colors = Colors::new(self.canvas[i][j].fg, self.canvas[i][j].bg);
                     if Some(colors) != last_colors {
                         queue!(self.out, SetColors(colors))?;
@@ -309,7 +369,7 @@ impl Game{
 
             // prepare to write out any post-grid contents.
             execute!(self.out, ResetColor)?;
-            queue!(self.out, MoveTo(top_left_c as u16, (top_left_r + self.r) as u16))?;
+            queue!(self.out, MoveTo(top_left_c as u16, (top_left_r + m) as u16))?;
 
             // print score, timer here?
 
@@ -317,7 +377,6 @@ impl Game{
             self.out.flush()?;
         }
         Ok(())
-
     }
 
     fn set_up(&mut self) -> Result<()>{
@@ -338,18 +397,22 @@ impl Game{
     fn game_loop(&mut self) -> Result<()>{
 
         // add some objects for debugging.
-        self.grid[2][2] = Some(GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false}));
-        self.grid[8][8] = Some(GridCell::Cd(Cloud{r:0, c:0, anim_state:0, delete:false}));
+        //self.grid[2][2] = Some(GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false}));
+        //self.grid[8][8] = Some(GridCell::Cd(Cloud{r:0, c:0, anim_state:0, delete:false}));
 
-        let tick_ms = Duration::from_millis(200);
+        self.grid[2][2] = GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false});
+        self.grid[8][8] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, delete:false});
+        self.grid[16][2] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, delete:false});
+
+        let tick_dur = Duration::from_millis(200);
         let time_beg = Instant::now();
         let mut quit = false;
-        let mut remaining_ms = tick_ms;
+        let mut remaining_dur = tick_dur;
 
         //let mut key_presses = 0;
 
         while !quit {
-            if event::poll(remaining_ms)? {
+            if event::poll(remaining_dur)? {
                 if let Event::Key(event) = event::read()? {
                     // \r is required because in raw mode the cursor doesn't automatically return.
                     print!("Key pressed: {:?}\r\n", event.code);
@@ -359,15 +422,15 @@ impl Game{
                     }
                 }
                 // as_millis() returns a u128, but from_millis() requires a u64.
-                let rem = tick_ms.as_millis() - (time_beg.elapsed().as_millis() % tick_ms.as_millis());
-                remaining_ms = Duration::from_millis(rem as u64);
+                let rem = tick_dur.as_millis() - (time_beg.elapsed().as_millis() % tick_dur.as_millis());
+                remaining_dur = Duration::from_millis(rem as u64);
             }
             else{
                 self.update();
                 self.draw()?;
 
-                let rem = tick_ms.as_millis() - (time_beg.elapsed().as_millis() % tick_ms.as_millis());
-                remaining_ms = Duration::from_millis(rem as u64);
+                let rem = tick_dur.as_millis() - (time_beg.elapsed().as_millis() % tick_dur.as_millis());
+                remaining_dur = Duration::from_millis(rem as u64);
             }
         }
         Ok(())
@@ -383,7 +446,7 @@ impl Game{
 
 fn main() -> Result<()> {
     // TODO: parse command line args.
-
+    
     let rows = MIN_ROWS;
     let cols = MIN_COLS;
     let mut game = Game::new(rows, cols, Box::new(io::stdout()));

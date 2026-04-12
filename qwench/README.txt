@@ -13,3 +13,11 @@ TODO:
 
 need one flag to allow adding words, another to allow adding single chars.
 the frequency of appearance in each should control frequency in the game.
+
+2026-04-05
+noted some interesting behavior with cargo build.
+if you pass the --message-format short flag,
+cargo remembers that and persists it for all build runs where the code does not recompile.
+
+
+

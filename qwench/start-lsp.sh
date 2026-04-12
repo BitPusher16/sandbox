@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 # start-lsp.sh — per-project LSP launcher
 
 echo "=== start-lsp.sh ran for $(basename "$(pwd)") ===" >&2
