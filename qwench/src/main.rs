@@ -1,11 +1,15 @@
+#![allow(unused)]
+
 use std::io;
 use std::io::{Write, Result};
 use std::time::{Duration, Instant};
+use std::collections::VecDeque;
+use std::collections::HashMap;
 
 use crossterm::{execute, queue};
 use crossterm::style::{Color, Colors, SetColors, ResetColor, Print};
 use crossterm::cursor::{Hide, Show, MoveTo};
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, size,
     BeginSynchronizedUpdate, EndSynchronizedUpdate, EnterAlternateScreen,
@@ -43,10 +47,8 @@ type Canvas = Vec<Vec<CanvasCell>>;
 type Sprite = Vec<Vec<CanvasCell>>;
 
 fn draw_onto(
-    //a: &mut Vec<Vec<CanvasCell>>,
     canvas: &mut Canvas,
-    //b: Vec<Vec<CanvasCell>>,
-    sprite: Sprite,
+    sprite: & Sprite,
     start_row: usize,
     start_col: usize,
 ) {
@@ -78,22 +80,22 @@ fn draw_onto(
 fn string_to_sprite(input: &str) -> Sprite {
     fn char_to_color(c: char) -> Color {
         match c.to_ascii_lowercase() {
-            'E' => Color::DarkGrey,
             'r' => Color::Red,
             'g' => Color::Green,
-            'y' => Color::Yellow,
             'b' => Color::Blue,
+            'y' => Color::Yellow,
             'm' => Color::Magenta,
             'c' => Color::Cyan,
             'w' => Color::White,
             'k' => Color::Black,
+            'e' => Color::Grey,
             'R' => Color::DarkRed,
             'G' => Color::DarkGreen,
-            'Y' => Color::DarkYellow,
             'B' => Color::DarkBlue,
+            'Y' => Color::DarkYellow,
             'M' => Color::DarkMagenta,
             'C' => Color::DarkCyan,
-            'e' => Color::Grey,
+            'E' => Color::DarkGrey,
             _ => Color::Reset,
         }
     }
@@ -120,14 +122,16 @@ fn string_to_sprite(input: &str) -> Sprite {
 #[derive(Debug, Copy, Clone)]
 struct Raindrop { r: usize, c: usize, anim_state: i32, delete: bool }
 
-#[derive(Debug, Copy, Clone)]
-struct Cloud { r: usize, c: usize, anim_state: i32, delete: bool }
+#[derive(Debug, Clone)]
+struct Cloud { r: usize, c: usize, anim_state: i32, word:String, idx:usize, delete: bool }
 
 #[derive(Debug, Copy, Clone)]
 struct Empty { r: usize, c: usize, anim_state: i32, delete: bool }
 
 impl Raindrop {
     fn get_sprite(&self) -> Sprite {
+        // TODO: some savings are possible here if we precompute the sprite.
+        // (same for other pieces.)
         match self.anim_state {
             0 => string_to_sprite(r#"
                 Owb Xwb Owb,
@@ -150,21 +154,40 @@ impl Raindrop {
             _ => self.anim_state
         }
     }
+
+    fn get_delete(& self) -> bool { self.delete }
 }
 
 impl Cloud {
     fn get_sprite(&self) -> Sprite {
-        match self.anim_state {
-            0 => string_to_sprite(r#"
-                vbw vbw vbw,
-                vbw vbw vbw
-            "#),
-            1 => string_to_sprite(r#"
-                ^bw ^bw ^bw,
-                ^bw ^bw ^bw
-            "#),
-            _ => string_to_sprite(r#"-bw"#),
+        //match self.anim_state {
+        //    0 => string_to_sprite(r#"
+        //        vbw vbw vbw,
+        //        vbw vbw vbw
+        //    "#),
+        //    1 => string_to_sprite(r#"
+        //        ^bw ^bw ^bw,
+        //        ^bw ^bw ^bw
+        //    "#),
+        //    _ => string_to_sprite(r#"-bw"#),
+        //}
+
+        let mut ret = String::new();
+        for i in 0..self.word.len() {
+            ret += "~bw ";
         }
+        ret += ",";
+        for (i, c) in self.word.chars().enumerate() {
+            ret += &c.to_string();
+            if i < self.idx {
+                ret += "rw "
+            }
+            else{
+                ret += "bw "
+            }
+        }
+
+        string_to_sprite(&ret)
     }
 
     fn update(&mut self) {
@@ -174,6 +197,8 @@ impl Cloud {
             _ => self.anim_state
         }
     }
+
+    fn get_delete(& self) -> bool { self.delete }
 }
 
 impl Empty {
@@ -184,9 +209,12 @@ impl Empty {
 
     fn update(&mut self) {
     }
+
+    fn get_delete(& self) -> bool { self.delete }
 }
 
-#[derive(Debug, Copy, Clone)]
+//#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 enum GridCell {
     Rd(Raindrop),
     Cd(Cloud),
@@ -242,6 +270,20 @@ impl Update for GridCell {
     }
 }
 
+trait GetDelete{
+    fn get_delete(&self) -> bool;
+}
+
+impl GetDelete for GridCell {
+    fn get_delete(& self) -> bool {
+        match self {
+            GridCell::Rd(rd) => rd.get_delete(),
+            GridCell::Cd(cd) => cd.get_delete(),
+            GridCell::Em(em) => em.get_delete(),
+        }
+    }
+}
+
 struct Game {
     out: Box<dyn Write>,
     //grid: Vec<Vec<Option<GridCell>>>,
@@ -250,6 +292,11 @@ struct Game {
     update_applied: Vec<Vec<bool>>,
     canvas: Vec<Vec<CanvasCell>>,
     elts_updated: u32,
+    char_fifo: VecDeque<char>,
+    first_char_to_grid_coords: HashMap<char, (usize, usize)>,
+    active_cloud_coords: (usize, usize),
+    quit: bool,
+    bad_press: bool,
 }
 
 impl Game{
@@ -263,6 +310,12 @@ impl Game{
             update_applied: vec![vec![false; n]; m],
             canvas: vec![vec![CanvasCell::default(); n]; m],
             elts_updated: 0,
+            char_fifo: VecDeque::new(),
+            first_char_to_grid_coords: HashMap::new(),
+            // NOTE: (0, 0) means DNE. no cloud will spawn with those coords.
+            active_cloud_coords: (0, 0), 
+            quit: false,
+            bad_press: false,
         }
     }
 
@@ -282,12 +335,15 @@ impl Game{
                 // if we have already finalized this cell (possibly while examining previous cell),
                 // do nothing.
                 if self.update_applied[i][j]{ continue; }
-
                 self.update_applied[i][j] = true;
+
+                if self.grid[i][j].get_delete(){
+                    self.grid[i][j] = GridCell::default();
+                }
                 self.grid[i][j].update();
 
                 // piece interaction logic.
-                match self.grid[i][j] {
+                match &self.grid[i][j] {
                     GridCell::Rd(rd) => {
                         if i + 1 == m{
                             self.grid[i][j] = GridCell::default();
@@ -298,7 +354,10 @@ impl Game{
                                 self.grid[i][j] = GridCell::default();
                             }
                             else{
-                                self.grid[i+1][j] = self.grid[i][j];
+                                //self.grid[i+1][j] = self.grid[i][j];
+                                //self.grid[i+i][j] = GridCell::Rd(rd);
+                                self.grid[i+1][j] = self.grid[i][j].clone();
+
                                 self.grid[i][j] = GridCell::default();
                                 // we have moved raindrop into next cell down,
                                 // so we should not update it again.
@@ -329,7 +388,7 @@ impl Game{
                 //    draw_onto(&mut self.canvas, sprite, i, j);
                 //}
                 let sprite = self.grid[i][j].get_sprite();
-                draw_onto(&mut self.canvas, sprite, i, j);
+                draw_onto(&mut self.canvas,& sprite, i, j);
             }
         }
 
@@ -339,8 +398,9 @@ impl Game{
         if curr_rows < m || curr_cols < n {
             execute!(self.out, Clear(ClearType::All), MoveTo(0,0))?;
             queue!(self.out, Print(format!(
-                "game dims set to {} rows, {} cols, current terminal dims are {} rows, {} cols.", 
-                m, MIN_COLS, curr_rows, curr_cols)))?;
+                "minimum dims {} rows, {} cols, terminal dims at {} rows, {} cols. \
+                resize to continue. esc to quit.",
+                m, n, curr_rows, curr_cols)))?;
             self.out.flush()?;
         }
         else{
@@ -372,11 +432,60 @@ impl Game{
             queue!(self.out, MoveTo(top_left_c as u16, (top_left_r + m) as u16))?;
 
             // print score, timer here?
+            //execute!(self.out, Print("foo"))?;
+            execute!(self.out, Print(format!("{:?}", self.char_fifo)))?;
 
             queue!(self.out, EndSynchronizedUpdate)?;
             self.out.flush()?;
         }
         Ok(())
+    }
+
+    fn handle_key_press(&mut self, c:char) {
+        if self.active_cloud_coords == (0, 0){
+            if let Some(coords) = self.first_char_to_grid_coords.get(&c) {
+                // no cloud is active,
+                // but user has entered a char with an available cloud.
+
+                // anything better than deref?
+                //let (active_i, active_j) = *coords;
+                let (active_i, active_j) = (coords.0, coords.1);
+
+                self.active_cloud_coords = (active_i, active_j);
+                if let GridCell::Cd(cd) = &mut self.grid[active_i][active_j]{
+                    cd.idx += 1;
+                }
+            }
+            else{
+                // no cloud is active,
+                // and user typed a char with no mapped cloud.
+                self.bad_press = true;
+            }
+        }
+        else{
+            // there is an active cloud.
+            let (active_i, active_j) = self.active_cloud_coords;
+            if let GridCell::Cd(cd) = &mut self.grid[active_i][active_j] {
+                if let Some(ch) = cd.word.chars().nth(cd.idx) {
+                    if ch == c {
+                        // the user's press matches the next letter in the word.
+                        cd.idx += 1;
+                        if cd.idx == cd.word.len(){
+                            cd.delete = true;
+                        }
+                        
+                        // TODO: the draw() function will eventually replace the character
+                        // and show it has been typed.
+                        // but this is noticeably slow.
+                        // read the contents of just this cell and use crossterm to overwrite it
+                        // with updated color.
+                    }
+                    else{
+                        self.bad_press = true;
+                    }
+                }
+            }
+        }
     }
 
     fn set_up(&mut self) -> Result<()>{
@@ -401,8 +510,13 @@ impl Game{
         //self.grid[8][8] = Some(GridCell::Cd(Cloud{r:0, c:0, anim_state:0, delete:false}));
 
         self.grid[2][2] = GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false});
-        self.grid[8][8] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, delete:false});
-        self.grid[16][2] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, delete:false});
+        self.grid[8][8] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
+            word:String::from("foobar"), idx:0, delete:false});
+        self.grid[16][2] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
+            word:String::from("bar"), idx:1, delete:false});
+
+        self.first_char_to_grid_coords.insert('f', (8, 8));
+        self.first_char_to_grid_coords.insert('b', (16, 2));
 
         let tick_dur = Duration::from_millis(200);
         let time_beg = Instant::now();
@@ -412,13 +526,32 @@ impl Game{
         //let mut key_presses = 0;
 
         while !quit {
+            // TODO: implement a delay for when bad press happens.
+            // the delay should not allow key presses to accumulate.
+            // keys pressed during a bad press delay should be discarded.
+            // for now, just reset bad_press back to false.
+            self.bad_press = false;
+
+            // the terminal will queue keys ready for reading.
+            // we can retrieve all available keys by repeatedly calling poll.
+            // if a key press is available, poll probably returns immediately, not confirmed.
             if event::poll(remaining_dur)? {
                 if let Event::Key(event) = event::read()? {
                     // \r is required because in raw mode the cursor doesn't automatically return.
-                    print!("Key pressed: {:?}\r\n", event.code);
+                    //print!("Key pressed: {:?}\r\n", event.code);
                     //key_presses += 1;
-                    if event.code == KeyCode::Char('q') {
+                    //if event.code == KeyCode::Char('q') {
+
+                    if event.code == KeyCode::Esc {
                         quit = true;
+                    }
+                    else{
+                        if event.kind == KeyEventKind::Press{
+                            if let KeyCode::Char(c) = event.code{
+                                //self.char_fifo.push_back(c);
+                                self.handle_key_press(c);
+                            }
+                        }
                     }
                 }
                 // as_millis() returns a u128, but from_millis() requires a u64.
