@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::collections::HashMap;
 
 use crossterm::{execute, queue};
-use crossterm::style::{Color, Colors, SetColors, ResetColor, Print};
+use crossterm::style::{Color, Colors, SetColors, ResetColor, Print, PrintStyledContent, Stylize};
 use crossterm::cursor::{Hide, Show, MoveTo};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{
@@ -15,6 +15,7 @@ use crossterm::terminal::{
     BeginSynchronizedUpdate, EndSynchronizedUpdate, EnterAlternateScreen,
     LeaveAlternateScreen, DisableLineWrap, EnableLineWrap, Clear, ClearType,
 };
+use crossterm::cursor;
 
 const MIN_COLS: usize = 144;
 const MIN_ROWS: usize = 48;
@@ -291,6 +292,8 @@ struct Game {
     //next_grid: Vec<Vec<GridCell>>,
     update_applied: Vec<Vec<bool>>,
     canvas: Vec<Vec<CanvasCell>>,
+    top_left_r: usize,
+    top_left_c: usize,
     elts_updated: u32,
     char_fifo: VecDeque<char>,
     first_char_to_grid_coords: HashMap<char, (usize, usize)>,
@@ -309,6 +312,8 @@ impl Game{
             //next_grid: vec![vec![GridCell::default(); n]; m],
             update_applied: vec![vec![false; n]; m],
             canvas: vec![vec![CanvasCell::default(); n]; m],
+            top_left_r: 0,
+            top_left_c: 0,
             elts_updated: 0,
             char_fifo: VecDeque::new(),
             first_char_to_grid_coords: HashMap::new(),
@@ -396,7 +401,8 @@ impl Game{
         let curr_cols = curr_cols as usize;
         let curr_rows = curr_rows as usize;
         if curr_rows < m || curr_cols < n {
-            execute!(self.out, Clear(ClearType::All), MoveTo(0,0))?;
+            //execute!(self.out, Clear(ClearType::All), MoveTo(0,0))?;
+            queue!(self.out, Clear(ClearType::All), MoveTo(0,0))?;
             queue!(self.out, Print(format!(
                 "minimum dims {} rows, {} cols, terminal dims at {} rows, {} cols. \
                 resize to continue. esc to quit.",
@@ -405,8 +411,8 @@ impl Game{
         }
         else{
             // we will center the game grid in the available terminal space.
-            let top_left_r = (curr_rows - m) / 2;
-            let top_left_c = (curr_cols - n) / 2;
+            self.top_left_r = (curr_rows - m) / 2;
+            self.top_left_c = (curr_cols - n) / 2;
 
             queue!(self.out, BeginSynchronizedUpdate)?;
             queue!(self.out, Clear(ClearType::All))?;
@@ -416,7 +422,7 @@ impl Game{
             let mut last_colors = None;
 
             for i in 0..m {
-                queue!(self.out, MoveTo(top_left_c as u16, (top_left_r + i) as u16))?;
+                queue!(self.out, MoveTo(self.top_left_c as u16, (self.top_left_r + i) as u16))?;
                 for j in 0..n {
                     let colors = Colors::new(self.canvas[i][j].fg, self.canvas[i][j].bg);
                     if Some(colors) != last_colors {
@@ -428,12 +434,14 @@ impl Game{
             }
 
             // prepare to write out any post-grid contents.
-            execute!(self.out, ResetColor)?;
-            queue!(self.out, MoveTo(top_left_c as u16, (top_left_r + m) as u16))?;
+            //execute!(self.out, ResetColor)?;
+            queue!(self.out, ResetColor)?;
+            queue!(self.out, MoveTo(self.top_left_c as u16, (self.top_left_r + m) as u16))?;
 
             // print score, timer here?
             //execute!(self.out, Print("foo"))?;
-            execute!(self.out, Print(format!("{:?}", self.char_fifo)))?;
+            //execute!(self.out, Print(format!("{:?}", self.char_fifo)))?;
+            queue!(self.out, Print(format!("{:?}", self.char_fifo)))?;
 
             queue!(self.out, EndSynchronizedUpdate)?;
             self.out.flush()?;
@@ -441,7 +449,7 @@ impl Game{
         Ok(())
     }
 
-    fn handle_key_press(&mut self, c:char) {
+    fn handle_key_press(&mut self, c:char) -> Result<()> {
         if self.active_cloud_coords == (0, 0){
             if let Some(coords) = self.first_char_to_grid_coords.get(&c) {
                 // no cloud is active,
@@ -453,6 +461,15 @@ impl Game{
 
                 self.active_cloud_coords = (active_i, active_j);
                 if let GridCell::Cd(cd) = &mut self.grid[active_i][active_j]{
+                    if let Some(ch) = cd.word.chars().nth(cd.idx) {
+                        let (char_i, char_j) = (self.top_left_r+active_i+1, self.top_left_c+active_j+cd.idx);
+                        execute!(self.out, 
+                            // MoveTo is (column, row).
+                            cursor::MoveTo(char_j as u16, char_i as u16),
+                            PrintStyledContent(ch.with(Color::Red).on(Color::White))
+                        )?;
+                    }
+
                     cd.idx += 1;
                 }
             }
@@ -469,16 +486,19 @@ impl Game{
                 if let Some(ch) = cd.word.chars().nth(cd.idx) {
                     if ch == c {
                         // the user's press matches the next letter in the word.
+
+                        let (char_i, char_j) = (self.top_left_r+active_i+1, self.top_left_c+active_j+cd.idx);
+                        execute!(self.out, 
+                            // MoveTo is (column, row).
+                            cursor::MoveTo(char_j as u16, char_i as u16),
+                            PrintStyledContent(ch.with(Color::Red).on(Color::White))
+                        )?;
+
                         cd.idx += 1;
                         if cd.idx == cd.word.len(){
                             cd.delete = true;
                         }
                         
-                        // TODO: the draw() function will eventually replace the character
-                        // and show it has been typed.
-                        // but this is noticeably slow.
-                        // read the contents of just this cell and use crossterm to overwrite it
-                        // with updated color.
                     }
                     else{
                         self.bad_press = true;
@@ -486,6 +506,7 @@ impl Game{
                 }
             }
         }
+        Ok(())
     }
 
     fn set_up(&mut self) -> Result<()>{
@@ -518,7 +539,7 @@ impl Game{
         self.first_char_to_grid_coords.insert('f', (8, 8));
         self.first_char_to_grid_coords.insert('b', (16, 2));
 
-        let tick_dur = Duration::from_millis(200);
+        let tick_dur = Duration::from_millis(600);
         let time_beg = Instant::now();
         let mut quit = false;
         let mut remaining_dur = tick_dur;
