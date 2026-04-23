@@ -1,0 +1,22 @@
+# game loop
+
+- add some kind of penalty system for wrong presses.
+  propagate fire faster?
+  tried blocking input for about 1 second, but multiple timers is difficult.
+- display error message to explain penalty?
+- add collision blocks for clouds.
+- implement dictionary system, generate clouds from dictionary.
+- write logic to propagate fire blocks.
+- write logic for rain to extinguish fire blocks.
+- add score? game timer?
+- loss screen?
+- display chars per minute, accuracy after game.
+- display per-char latency after game?
+
+# features
+
+- flag to control chars per minute.
+- add flag to record key press timing history.
+- add flag to read and display key press timing history.
+- flag to practice only slowest letters? (this duplicates custom dictionaries a bit.)
+- thinking i don't need a game menu. different modes (game, stats) will be accessible from flags.

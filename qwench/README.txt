@@ -6,11 +6,6 @@ https://github.com/sahaj-b/go-attend
 
 considering crossterm for terminal management.
 
-
-TODO:
-- add command line arg for passing dictionary file.
-- add command line args to change game grid size, word speed, etc.
-
 need one flag to allow adding words, another to allow adding single chars.
 the frequency of appearance in each should control frequency in the game.
 

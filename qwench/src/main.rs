@@ -17,6 +17,10 @@ use crossterm::terminal::{
 };
 use crossterm::cursor;
 
+use rand::prelude::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
 const MIN_COLS: usize = 144;
 const MIN_ROWS: usize = 48;
 
@@ -129,6 +133,9 @@ struct Cloud { r: usize, c: usize, anim_state: i32, word:String, idx:usize, dele
 #[derive(Debug, Copy, Clone)]
 struct Empty { r: usize, c: usize, anim_state: i32, delete: bool }
 
+#[derive(Debug, Copy, Clone)]
+struct Badkey { r: usize, c: usize, anim_state: i32, delete: bool }
+
 impl Raindrop {
     fn get_sprite(&self) -> Sprite {
         // TODO: some savings are possible here if we precompute the sprite.
@@ -161,17 +168,6 @@ impl Raindrop {
 
 impl Cloud {
     fn get_sprite(&self) -> Sprite {
-        //match self.anim_state {
-        //    0 => string_to_sprite(r#"
-        //        vbw vbw vbw,
-        //        vbw vbw vbw
-        //    "#),
-        //    1 => string_to_sprite(r#"
-        //        ^bw ^bw ^bw,
-        //        ^bw ^bw ^bw
-        //    "#),
-        //    _ => string_to_sprite(r#"-bw"#),
-        //}
 
         let mut ret = String::new();
         for i in 0..self.word.len() {
@@ -214,12 +210,27 @@ impl Empty {
     fn get_delete(& self) -> bool { self.delete }
 }
 
+impl Badkey {
+    fn get_sprite(&self) -> Sprite {
+        //string_to_sprite(r#" .bk "#)
+        string_to_sprite(r#"
+            █rr █rr █rr █rr
+        "#) // empty string has effect of making draw() do no-op.
+    }
+
+    fn update(&mut self) {
+    }
+
+    fn get_delete(& self) -> bool { self.delete }
+}
+
 //#[derive(Debug, Copy, Clone)]
 #[derive(Debug, Clone)]
 enum GridCell {
     Rd(Raindrop),
     Cd(Cloud),
     Em(Empty),
+    Bk(Badkey),
 }
 
 impl Default for GridCell{
@@ -253,6 +264,7 @@ impl GetSprite for GridCell {
             GridCell::Rd(rd) => rd.get_sprite(),
             GridCell::Cd(cd) => cd.get_sprite(),
             GridCell::Em(em) => em.get_sprite(),
+            GridCell::Bk(bk) => bk.get_sprite(),
         }
     }
 }
@@ -267,6 +279,7 @@ impl Update for GridCell {
             GridCell::Rd(rd) => rd.update(),
             GridCell::Cd(cd) => cd.update(),
             GridCell::Em(em) => em.update(),
+            GridCell::Bk(bk) => bk.update(),
         }
     }
 }
@@ -281,11 +294,13 @@ impl GetDelete for GridCell {
             GridCell::Rd(rd) => rd.get_delete(),
             GridCell::Cd(cd) => cd.get_delete(),
             GridCell::Em(em) => em.get_delete(),
+            GridCell::Bk(bk) => bk.get_delete(),
         }
     }
 }
 
 struct Game {
+    ticks: u64,
     out: Box<dyn Write>,
     //grid: Vec<Vec<Option<GridCell>>>,
     grid: Vec<Vec<GridCell>>,
@@ -300,11 +315,14 @@ struct Game {
     active_cloud_coords: (usize, usize),
     quit: bool,
     bad_press: bool,
+    rng: StdRng,
+    debug_vec: Vec<String>,
 }
 
 impl Game{
     fn new(m: usize, n: usize, out: Box<dyn Write>) -> Self{
         Game {
+            ticks: 0,
             out,
             //grid: vec![vec![None; n]; m],
             //grid: vec![vec![GridCell.default(); n]; m],
@@ -321,11 +339,42 @@ impl Game{
             active_cloud_coords: (0, 0), 
             quit: false,
             bad_press: false,
+            rng: StdRng::seed_from_u64(8),
+            debug_vec: Vec::new()
         }
     }
 
+    fn place_raindrop(&mut self){
+        if self.ticks % 2 == 0{
+            let (m, n) = (self.grid.len(), self.grid[0].len());
+            let raindrop_search_beg: usize = self.rng.random_range(0..n);
+            //self.debug_vec.push(format!("{raindrop_search_beg}"));
+            let mut raindrop_search_cur = raindrop_search_beg;
+            while( (raindrop_search_cur + 1) % n != raindrop_search_beg){
+                if let GridCell::Em(em) = &self.grid[0][raindrop_search_cur] {
+                    self.grid[0][raindrop_search_cur] = 
+                        GridCell::Rd(Raindrop{r:0, c:0, anim_state:0, delete:false});
+                    self.update_applied[0][raindrop_search_cur] = true;
+                    break;
+                }
+
+                raindrop_search_cur = (raindrop_search_cur + 1) % n;
+            }
+        }
+    }
+
+    fn place_cloud(&mut self){
+    }
+
     fn update(&mut self) {
+        self.ticks += 1;
+
+        // NOTE: update_applied must be cleared before placing raindrops or clouds.
+        // placing a raindrop or a cloud will both update a cell.
         for row in &mut self.update_applied { row.fill(false); }
+
+        self.place_raindrop();
+        self.place_cloud();
 
         let (m, n) = (self.grid.len(), self.grid[0].len());
         for i in 0..m {
@@ -350,29 +399,47 @@ impl Game{
                 // piece interaction logic.
                 match &self.grid[i][j] {
                     GridCell::Rd(rd) => {
-                        if i + 1 == m{
-                            self.grid[i][j] = GridCell::default();
+                        // if raindrop has reached bottom of grid, erase it.
+                        // (this should never happen. raindrop should hit either grass or cloud.)
+                        if i + 1 == m{ 
+                            self.grid[i][j] = GridCell::default(); 
+                            continue;
                         }
-                        else{
-                            // if raindrop is above cloud, remove it.
-                            if matches!(self.grid[i + 1][j], GridCell::Cd(_)){
-                                self.grid[i][j] = GridCell::default();
-                            }
-                            else{
-                                //self.grid[i+1][j] = self.grid[i][j];
-                                //self.grid[i+i][j] = GridCell::Rd(rd);
-                                self.grid[i+1][j] = self.grid[i][j].clone();
 
+                        // search the row below raindrop.
+                        // start with the cell immediately below raindrop and search left.
+                        // if encountered object is cloud, check cloud length,
+                        // and if raindrop collides with cloud, delete raindrop.
+
+                        let (mut i_search, mut j_search) = (i+1, j);
+                        while !matches!(&self.grid[i_search][j_search], GridCell::Cd(_)) && j_search > 0 {
+                            j_search -= 1;
+                        }
+
+                        if let GridCell::Cd(cd) = &self.grid[i_search][j_search] {
+                            let word_len = cd.word.len();
+                            if(j_search - 1 + word_len >= j){
                                 self.grid[i][j] = GridCell::default();
-                                // we have moved raindrop into next cell down,
-                                // so we should not update it again.
-                                self.update_applied[i+1][j] = true;
+                                continue;
                             }
                         }
+
+                        // move raindrop down one row.
+
+                        //self.grid[i+1][j] = self.grid[i][j];
+                        //self.grid[i+i][j] = GridCell::Rd(rd);
+                        self.grid[i+1][j] = self.grid[i][j].clone();
+                        self.grid[i][j] = GridCell::default();
+
+                        // we have moved raindrop into next cell down,
+                        // and we should not update the destination cell when we update next row.
+                        self.update_applied[i+1][j] = true;
                     }
                     GridCell::Cd(cd) => {
                     }
                     GridCell::Em(em) => {
+                    }
+                    GridCell::Bk(bk) => {
                     }
                 }
             }
@@ -441,7 +508,8 @@ impl Game{
             // print score, timer here?
             //execute!(self.out, Print("foo"))?;
             //execute!(self.out, Print(format!("{:?}", self.char_fifo)))?;
-            queue!(self.out, Print(format!("{:?}", self.char_fifo)))?;
+            //queue!(self.out, Print(format!("{:?}", self.char_fifo)))?;
+            queue!(self.out, Print(format!("{:?}", self.debug_vec)))?;
 
             queue!(self.out, EndSynchronizedUpdate)?;
             self.out.flush()?;
@@ -450,8 +518,16 @@ impl Game{
     }
 
     fn handle_key_press(&mut self, c:char) -> Result<()> {
+        //self.debug_vec.push("k".to_string());
+
+        // setting active_cloud_coords to 0, 0 signifies no active cloud.
+
+        let mut inc_index = false;
+
         if self.active_cloud_coords == (0, 0){
-            if let Some(coords) = self.first_char_to_grid_coords.get(&c) {
+            //if let Some(coords) = self.first_char_to_grid_coords.get(&c) {
+            if let Some((key, coords)) = self.first_char_to_grid_coords.remove_entry(&c) {
+
                 // no cloud is active,
                 // but user has entered a char with an available cloud.
 
@@ -460,17 +536,9 @@ impl Game{
                 let (active_i, active_j) = (coords.0, coords.1);
 
                 self.active_cloud_coords = (active_i, active_j);
-                if let GridCell::Cd(cd) = &mut self.grid[active_i][active_j]{
-                    if let Some(ch) = cd.word.chars().nth(cd.idx) {
-                        let (char_i, char_j) = (self.top_left_r+active_i+1, self.top_left_c+active_j+cd.idx);
-                        execute!(self.out, 
-                            // MoveTo is (column, row).
-                            cursor::MoveTo(char_j as u16, char_i as u16),
-                            PrintStyledContent(ch.with(Color::Red).on(Color::White))
-                        )?;
-                    }
 
-                    cd.idx += 1;
+                if let GridCell::Cd(cd) = &mut self.grid[active_i][active_j]{
+                    inc_index = true;
                 }
             }
             else{
@@ -486,22 +554,32 @@ impl Game{
                 if let Some(ch) = cd.word.chars().nth(cd.idx) {
                     if ch == c {
                         // the user's press matches the next letter in the word.
-
-                        let (char_i, char_j) = (self.top_left_r+active_i+1, self.top_left_c+active_j+cd.idx);
-                        execute!(self.out, 
-                            // MoveTo is (column, row).
-                            cursor::MoveTo(char_j as u16, char_i as u16),
-                            PrintStyledContent(ch.with(Color::Red).on(Color::White))
-                        )?;
-
-                        cd.idx += 1;
-                        if cd.idx == cd.word.len(){
-                            cd.delete = true;
-                        }
-                        
+                        inc_index = true;
                     }
                     else{
                         self.bad_press = true;
+                    }
+                }
+            }
+        }
+
+        if inc_index {
+            let (active_i, active_j) = self.active_cloud_coords;
+            if let GridCell::Cd(cd) = &mut self.grid[active_i][active_j] {
+                if let Some(ch) = cd.word.chars().nth(cd.idx) {
+                    // a bit of extra math needed to find where current letter is drawn.
+                    let (char_i, char_j) = (self.top_left_r+active_i+1, self.top_left_c+active_j+cd.idx);
+
+                    execute!(self.out, 
+                        // MoveTo is (column, row).
+                        cursor::MoveTo(char_j as u16, char_i as u16),
+                        PrintStyledContent(ch.with(Color::Red).on(Color::White))
+                    )?;
+
+                    cd.idx += 1;
+                    if cd.idx == cd.word.len(){
+                        cd.delete = true;
+                        self.active_cloud_coords = (0, 0);
                     }
                 }
             }
@@ -531,13 +609,20 @@ impl Game{
         //self.grid[8][8] = Some(GridCell::Cd(Cloud{r:0, c:0, anim_state:0, delete:false}));
 
         self.grid[2][2] = GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false});
+        self.grid[2][10] = GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false});
+        self.grid[2][14] = GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false});
         self.grid[8][8] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
             word:String::from("foobar"), idx:0, delete:false});
         self.grid[16][2] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
-            word:String::from("bar"), idx:1, delete:false});
+            word:String::from("bar"), idx:0, delete:false});
+        self.grid[16][22] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
+            word:String::from("cat"), idx:0, delete:false});
 
         self.first_char_to_grid_coords.insert('f', (8, 8));
         self.first_char_to_grid_coords.insert('b', (16, 2));
+        self.first_char_to_grid_coords.insert('c', (16, 22));
+
+        //self.grid[0][32] = GridCell::Bk(Badkey{r:0, c:0, anim_state:0, delete:false});
 
         let tick_dur = Duration::from_millis(600);
         let time_beg = Instant::now();
