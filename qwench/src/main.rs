@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::collections::HashMap;
 use std::collections::BTreeMap;
 use std::cmp::max;
-use std::panic::{self, AssertUnwindSafe};
+use std::panic;
 
 use crossterm::{execute, queue};
 use crossterm::style::{Color, Colors, SetColors, ResetColor, Print, PrintStyledContent, Stylize};
@@ -685,8 +685,8 @@ impl Game{
 
                         let (mut i_search, mut j_search) = (i+1, j);
                         while !matches!(&self.grid[i_search][j_search], GridCell::Cd(_)) && j_search > 0 {
-                            j_search -= 1;
-                            //j_search -= 1000;
+                            //j_search -= 1;
+                            j_search -= 1000;
                         }
 
                         if let GridCell::Cd(cd) = &self.grid[i_search][j_search] {
@@ -975,9 +975,32 @@ impl Game{
     }
 
     fn run(&mut self) -> Result<()> {
+        
+        // set up panic hook before enabling raw mode.
+        let default_hook = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            // Best-effort teardown — ignore errors
+            let _ = disable_raw_mode();
+            let _ = execute!(
+                // note: stderr, not stdout.
+                io::stderr(),
+                LeaveAlternateScreen,
+                Show,
+                EnableLineWrap
+            );
+            // let the default hook print the trace.
+            default_hook(info);
+        }));
+
         self.set_up()?;
         self.game_loop()?;
         self.tear_down()?;
+        
+        // restore the original hook.
+        panic::set_hook(Box::new(|info| {
+            eprintln!("{info}");
+        }));
+
         Ok(())
     }
 }
