@@ -5,6 +5,8 @@ use std::io::{Write, Result};
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use std::collections::HashMap;
+use std::collections::BTreeMap;
+use std::cmp::max;
 
 use crossterm::{execute, queue};
 use crossterm::style::{Color, Colors, SetColors, ResetColor, Print, PrintStyledContent, Stylize};
@@ -18,8 +20,11 @@ use crossterm::terminal::{
 use crossterm::cursor;
 
 use rand::prelude::*;
-use rand::rngs::StdRng;
+//use rand::rngs::StdRng;
 use rand::SeedableRng;
+
+mod word_list;
+use crate::word_list::get_word_list;
 
 const MIN_COLS: usize = 144;
 const MIN_ROWS: usize = 48;
@@ -140,19 +145,24 @@ impl Raindrop {
     fn get_sprite(&self) -> Sprite {
         // TODO: some savings are possible here if we precompute the sprite.
         // (same for other pieces.)
-        match self.anim_state {
-            0 => string_to_sprite(r#"
-                Owb Xwb Owb,
-                Owb Orb Owb,
-                Owb Orb Owb,
-            "#),
-            1 => string_to_sprite(r#"
-                Owb Owb Owb,
-                Owb Orb Owb,
-                Owb Xwb Owb
-            "#),
-            _ => string_to_sprite(r#"Owb"#),
-        }
+
+        //match self.anim_state {
+        //    0 => string_to_sprite(r#"
+        //        Owb Xwb Owb,
+        //        Owb Orb Owb,
+        //        Owb Orb Owb,
+        //    "#),
+        //    1 => string_to_sprite(r#"
+        //        Owb Owb Owb,
+        //        Owb Orb Owb,
+        //        Owb Xwb Owb
+        //    "#),
+        //    _ => string_to_sprite(r#"Owb"#),
+        //}
+        
+        string_to_sprite(r#"
+            Uwb
+        "#)
     }
 
     fn update(&mut self) {
@@ -170,10 +180,6 @@ impl Cloud {
     fn get_sprite(&self) -> Sprite {
 
         let mut ret = String::new();
-        for i in 0..self.word.len() {
-            ret += "~bw ";
-        }
-        ret += ",";
         for (i, c) in self.word.chars().enumerate() {
             ret += &c.to_string();
             if i < self.idx {
@@ -182,6 +188,12 @@ impl Cloud {
             else{
                 ret += "bw "
             }
+        }
+        ret += ",";
+        for i in 0..self.word.len() {
+            //if self.idx == 0{ ret += "~bw "; }
+            //else{ ret += "~rw "; }
+            ret += "~bw "
         }
 
         string_to_sprite(&ret)
@@ -299,6 +311,87 @@ impl GetDelete for GridCell {
     }
 }
 
+fn read_words_from_disk() -> Vec<String>{
+    vec![
+        "cloud".to_string(),
+        "rain".to_string(),
+        "storm".to_string(),
+        "thunder".to_string(),
+        "lightning".to_string(),
+        "mist".to_string(),
+        "fog".to_string(),
+        "sky".to_string(),
+        "cumulus".to_string(),
+        "nimbus".to_string(),
+    ]
+}
+
+#[derive(Debug)]
+pub struct WordPool {
+    // All words grouped by their first character
+    groups: BTreeMap<char, Vec<String>>,
+
+    // Currently AVAILABLE (not in-use) starting characters
+    // This list is what lets us randomly pick a free letter quickly
+    available_starts: Vec<char>,
+}
+
+impl WordPool {
+    pub fn new(words: Vec<String>) -> Self {
+        let mut groups: BTreeMap<char, Vec<String>> = BTreeMap::new();
+
+        for word in words {
+            if let Some(first_char) = word.chars().next() {
+                groups.entry(first_char).or_default().push(word);
+            }
+        }
+
+        // This will always produce the same order: ['a', 'b', 'c', ..., 'z']
+        let available_starts: Vec<char> = groups.keys().cloned().collect();
+
+        Self {
+            groups,
+            available_starts,
+        }
+    }
+
+    pub fn get(&mut self, rng: &mut impl Rng) -> Option<String> {
+        if self.available_starts.is_empty() {
+            return None;
+        }
+
+        // Pick a random free starting character
+        let idx = rng.random_range(0..self.available_starts.len());
+        let chosen_char = self.available_starts.swap_remove(idx);
+
+        // Pick a random word from that character's group
+        if let Some(word_list) = self.groups.get(&chosen_char) {
+            if !word_list.is_empty() {
+                let word_idx = rng.random_range(0..word_list.len());
+                return Some(word_list[word_idx].clone());
+            }
+        }
+
+        None
+    }
+
+    pub fn put(&mut self, c: char) {
+        // Only add it back if we actually know this character
+        // and it's not already in the available list
+        if self.groups.contains_key(&c) && !self.available_starts.contains(&c) {
+            self.available_starts.push(c);
+        }
+    }
+
+    pub fn available_count(&self) -> usize {
+        self.available_starts.len()
+    }
+
+    pub fn has_available(&self) -> bool {
+        !self.available_starts.is_empty()
+    }
+}
+
 struct Game {
     ticks: u64,
     out: Box<dyn Write>,
@@ -316,11 +409,12 @@ struct Game {
     quit: bool,
     bad_press: bool,
     rng: StdRng,
+    word_pool: WordPool,
     debug_vec: Vec<String>,
 }
 
 impl Game{
-    fn new(m: usize, n: usize, out: Box<dyn Write>) -> Self{
+    fn new(m: usize, n: usize, out: Box<dyn Write>, word_list: Vec<String>) -> Self{
         Game {
             ticks: 0,
             out,
@@ -339,31 +433,105 @@ impl Game{
             active_cloud_coords: (0, 0), 
             quit: false,
             bad_press: false,
-            rng: StdRng::seed_from_u64(8),
+            rng: SeedableRng::seed_from_u64(8),
+            word_pool: WordPool::new(word_list),
             debug_vec: Vec::new()
         }
     }
 
     fn place_raindrop(&mut self){
-        if self.ticks % 2 == 0{
-            let (m, n) = (self.grid.len(), self.grid[0].len());
-            let raindrop_search_beg: usize = self.rng.random_range(0..n);
-            //self.debug_vec.push(format!("{raindrop_search_beg}"));
-            let mut raindrop_search_cur = raindrop_search_beg;
-            while( (raindrop_search_cur + 1) % n != raindrop_search_beg){
-                if let GridCell::Em(em) = &self.grid[0][raindrop_search_cur] {
-                    self.grid[0][raindrop_search_cur] = 
-                        GridCell::Rd(Raindrop{r:0, c:0, anim_state:0, delete:false});
-                    self.update_applied[0][raindrop_search_cur] = true;
-                    break;
-                }
+        let (m, n) = (self.grid.len(), self.grid[0].len());
+        let raindrop_search_beg: usize = self.rng.random_range(0..n);
+        //self.debug_vec.push(format!("{raindrop_search_beg}"));
+        let mut raindrop_search_cur = raindrop_search_beg;
 
-                raindrop_search_cur = (raindrop_search_cur + 1) % n;
+        loop {
+            if let GridCell::Em(em) = &self.grid[0][raindrop_search_cur] {
+                self.grid[0][raindrop_search_cur] = 
+                    GridCell::Rd(Raindrop{r:0, c:0, anim_state:0, delete:false});
+                self.update_applied[0][raindrop_search_cur] = true;
+                break;
             }
+
+            raindrop_search_cur = (raindrop_search_cur + 1) % n;
+            if raindrop_search_cur == raindrop_search_beg{ break; }
         }
     }
 
     fn place_cloud(&mut self){
+        // this is probably not idiomatic.
+        // but i don't want to bury the whole function in an if statement.
+        if !self.word_pool.has_available(){ return; }
+        let word = self.word_pool.get(&mut self.rng).unwrap_or("error".to_string());
+
+        let (m, n) = (self.grid.len(), self.grid[0].len());
+
+        //if let Some(word) = self.word_pool.get(&mut self.rng){ }
+
+        // no clouds first row. no clouds last 3 rows.
+        let cloud_min: usize = n;
+        let cloud_max: usize = (m*n) - (3*n);
+
+        let cloud_search_begin: usize = self.rng.random_range(cloud_min..cloud_max);
+        let mut cloud_search_cur = cloud_search_begin;
+        //self.debug_vec.push(format!("search {cloud_search_begin}").to_string());
+
+        'iter_cloud_cells: loop{
+            let (i, j) = (cloud_search_cur / n, cloud_search_cur % n);
+            //self.debug_vec.push(format!("considering {i},{j}").to_string());
+
+            if let GridCell::Em(em) = &self.grid[i][j] {
+                // check if space exists for word.
+                // if obstacle encountered (wall, non-empty item),
+                // bump index up to the location of obstacle.
+
+                let mut k = j + 1;
+                'iter_word_space: loop {
+
+                    if (k - j) == word.len(){
+                        // we have space for the word.
+                        // place word now? or better after loop?
+
+                        self.grid[i][j] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
+                            word:word.clone(), idx:0, delete:false});
+                        if let Some(ch) = word.chars().next(){
+                            self.first_char_to_grid_coords.insert(ch, (i, j));
+                        }
+                        break 'iter_cloud_cells;
+                    }
+
+                    // reached end of row.
+                    if k == n{ 
+                        cloud_search_cur += (k - j - 1);
+                        break;
+                    }
+
+                    if i*n + j == cloud_search_begin {
+                        // we are about to run out of places to fit new cloud.
+                        // quit early to simplify bump logic.
+                        // decrement by one so the outer loop increment hits exit.
+                        cloud_search_cur += (k - j - 1);
+                        break;
+                    }
+
+                    if !matches!(self.grid[i][k], GridCell::Em(_)) {
+                        // CAUTION: this bump may jump over original search point.
+                        cloud_search_cur += (k - j);
+                        break;
+                    }
+
+                    k += 1;
+                }
+            }
+
+            cloud_search_cur += 1;
+            cloud_search_cur %= cloud_max;
+            cloud_search_cur = max(cloud_search_cur, cloud_min);
+            if cloud_search_cur == cloud_search_begin{ 
+                self.debug_vec.push("no space for cloud".to_string());
+                break; 
+            }
+        }
     }
 
     fn update(&mut self) {
@@ -373,8 +541,8 @@ impl Game{
         // placing a raindrop or a cloud will both update a cell.
         for row in &mut self.update_applied { row.fill(false); }
 
-        self.place_raindrop();
-        self.place_cloud();
+        if self.ticks % 4 == 0{ self.place_raindrop(); }
+        if self.ticks % 2 == 0{ self.place_cloud(); }
 
         let (m, n) = (self.grid.len(), self.grid[0].len());
         for i in 0..m {
@@ -568,7 +736,9 @@ impl Game{
             if let GridCell::Cd(cd) = &mut self.grid[active_i][active_j] {
                 if let Some(ch) = cd.word.chars().nth(cd.idx) {
                     // a bit of extra math needed to find where current letter is drawn.
-                    let (char_i, char_j) = (self.top_left_r+active_i+1, self.top_left_c+active_j+cd.idx);
+
+                    //let (char_i, char_j) = (self.top_left_r+active_i+1, self.top_left_c+active_j+cd.idx);
+                    let (char_i, char_j) = (self.top_left_r+active_i, self.top_left_c+active_j+cd.idx);
 
                     execute!(self.out, 
                         // MoveTo is (column, row).
@@ -580,6 +750,9 @@ impl Game{
                     if cd.idx == cd.word.len(){
                         cd.delete = true;
                         self.active_cloud_coords = (0, 0);
+                        if let Some(ch) = cd.word.chars().next(){
+                            self.word_pool.put(ch);
+                        }
                     }
                 }
             }
@@ -608,19 +781,19 @@ impl Game{
         //self.grid[2][2] = Some(GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false}));
         //self.grid[8][8] = Some(GridCell::Cd(Cloud{r:0, c:0, anim_state:0, delete:false}));
 
-        self.grid[2][2] = GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false});
-        self.grid[2][10] = GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false});
-        self.grid[2][14] = GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false});
-        self.grid[8][8] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
-            word:String::from("foobar"), idx:0, delete:false});
-        self.grid[16][2] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
-            word:String::from("bar"), idx:0, delete:false});
-        self.grid[16][22] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
-            word:String::from("cat"), idx:0, delete:false});
+        //self.grid[2][2] = GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false});
+        //self.grid[2][10] = GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false});
+        //self.grid[2][14] = GridCell::Rd(Raindrop{r:0, c:0, anim_state:1, delete:false});
+        //self.grid[8][8] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
+        //    word:String::from("foobar"), idx:0, delete:false});
+        //self.grid[16][2] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
+        //    word:String::from("bar"), idx:0, delete:false});
+        //self.grid[16][22] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
+        //    word:String::from("cat"), idx:0, delete:false});
 
-        self.first_char_to_grid_coords.insert('f', (8, 8));
-        self.first_char_to_grid_coords.insert('b', (16, 2));
-        self.first_char_to_grid_coords.insert('c', (16, 22));
+        //self.first_char_to_grid_coords.insert('f', (8, 8));
+        //self.first_char_to_grid_coords.insert('b', (16, 2));
+        //self.first_char_to_grid_coords.insert('c', (16, 22));
 
         //self.grid[0][32] = GridCell::Bk(Badkey{r:0, c:0, anim_state:0, delete:false});
 
@@ -688,7 +861,9 @@ fn main() -> Result<()> {
     
     let rows = MIN_ROWS;
     let cols = MIN_COLS;
-    let mut game = Game::new(rows, cols, Box::new(io::stdout()));
+    //let word_list = read_words_from_disk();
+    let word_list = word_list::get_word_list();
+    let mut game = Game::new(rows, cols, Box::new(io::stdout()), word_list);
     game.run()?;
     Ok(())
 }

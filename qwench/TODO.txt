@@ -20,3 +20,6 @@
 - add flag to read and display key press timing history.
 - flag to practice only slowest letters? (this duplicates custom dictionaries a bit.)
 - thinking i don't need a game menu. different modes (game, stats) will be accessible from flags.
+
+- absolutely need a high score function.
+- high score should scale with speed. and also reward diverse character sets?
