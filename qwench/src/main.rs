@@ -7,6 +7,7 @@ use std::collections::VecDeque;
 use std::collections::HashMap;
 use std::collections::BTreeMap;
 use std::cmp::max;
+use std::panic::{self, AssertUnwindSafe};
 
 use crossterm::{execute, queue};
 use crossterm::style::{Color, Colors, SetColors, ResetColor, Print, PrintStyledContent, Stylize};
@@ -54,29 +55,62 @@ type Canvas = Vec<Vec<CanvasCell>>;
 //    cells: Vec<Vec<CanvasCell>>,
 //}
 
-type Sprite = Vec<Vec<CanvasCell>>;
+//type Sprite = Vec<Vec<CanvasCell>>;
 
+#[derive(Debug, Clone, PartialEq)]   // Copy removed — Vec is not Copy
+struct Sprite {
+    data: Vec<Vec<CanvasCell>>,
+    shift_up: usize,     // how many rows to shift the sprite UP
+    shift_left: usize,   // how many columns to shift the sprite LEFT
+}
+
+impl Sprite{
+    fn push(&mut self, vec: Vec<CanvasCell>){
+        self.data.push(vec);
+    }
+
+    fn new() -> Self{
+        //self.data = Vec::new();
+        Sprite{
+            data: Vec::new(),
+            shift_up: 0,
+            shift_left: 0,
+        }
+    }
+}
+
+// TODO:
+// not convinced i need to support sprite shift_up, shift_left.
+// game logic is definitely easier if i do without it.
+// leaving it for now, can clean up later.
 fn draw_onto(
     canvas: &mut Canvas,
-    sprite: & Sprite,
+    sprite: &Sprite,
     start_row: usize,
     start_col: usize,
 ) {
-    let canv_m = canvas.len();
-    if canv_m == 0 || sprite.is_empty() {
+    let canv_rows = canvas.len() as isize;
+    if canv_rows == 0 || sprite.data.is_empty() {
         return;
     }
 
-    for (i, sprite_row) in sprite.iter().enumerate() {
-        let target_row = start_row + i;
-        if target_row >= canv_m { break; }
+    let origin_row = start_row as isize - sprite.shift_up as isize;
+    let origin_col = start_col as isize - sprite.shift_left as isize;
 
-        let canv_row = &mut canvas[target_row];
+    for (i, sprite_row) in sprite.data.iter().enumerate() {
+        let target_row = origin_row + i as isize;
+        if target_row < 0 { continue; }
+        if target_row >= canv_rows { break; }
+
+        let canv_row = &mut canvas[target_row as usize];
+        let canv_cols = canv_row.len() as isize;
 
         for (j, &cell) in sprite_row.iter().enumerate() {
-            let target_col = start_col + j;
-            if target_col >= canv_row.len() { break; }
-            canv_row[target_col] = cell;
+            let target_col = origin_col + j as isize;
+            if target_col < 0 { continue; }
+            if target_col >= canv_cols { break; }
+
+            canv_row[target_col as usize] = cell;
         }
     }
 }
@@ -87,7 +121,7 @@ fn draw_onto(
 //       cbr xbr xbr,
 //       xbr $br zgr,
 //   "#);
-fn string_to_sprite(input: &str) -> Sprite {
+fn string_to_sprite(input: &str, shift_up: usize, shift_left: usize) -> Sprite {
     fn char_to_color(c: char) -> Color {
         match c.to_ascii_lowercase() {
             'r' => Color::Red,
@@ -110,7 +144,10 @@ fn string_to_sprite(input: &str) -> Sprite {
         }
     }
 
-    let mut sprite: Sprite = Vec::new();
+    //let mut sprite: Sprite = Vec::new();
+    let mut sprite = Sprite::new();
+    sprite.shift_up = shift_up;
+    sprite.shift_left = shift_left;
     let cleaned: String = input.chars().filter(|c| !c.is_whitespace()).collect();
     for row_str in cleaned.split(',') {
         if row_str.is_empty() { continue; }
@@ -141,6 +178,9 @@ struct Empty { r: usize, c: usize, anim_state: i32, delete: bool }
 #[derive(Debug, Copy, Clone)]
 struct Badkey { r: usize, c: usize, anim_state: i32, delete: bool }
 
+#[derive(Debug, Copy, Clone)]
+struct Grass { r: usize, c: usize, anim_state: i32, fire: bool, delete: bool }
+
 impl Raindrop {
     fn get_sprite(&self) -> Sprite {
         // TODO: some savings are possible here if we precompute the sprite.
@@ -162,7 +202,7 @@ impl Raindrop {
         
         string_to_sprite(r#"
             Uwb
-        "#)
+        "#, 0, 0)
     }
 
     fn update(&mut self) {
@@ -193,18 +233,25 @@ impl Cloud {
         for i in 0..self.word.len() {
             //if self.idx == 0{ ret += "~bw "; }
             //else{ ret += "~rw "; }
-            ret += "~bw "
+
+            //ret += "~bw "
+            ret += match self.anim_state {
+                0 => "~bw",
+                1 => "*bw",
+                _ => "~bw"
+            }
         }
 
-        string_to_sprite(&ret)
+        string_to_sprite(&ret, 0, 0)
     }
 
     fn update(&mut self) {
-        self.anim_state = match self.anim_state {
-            0 => 1,
-            1 => 0,
-            _ => self.anim_state
-        }
+        //self.anim_state = match self.anim_state {
+        //    0 => 1,
+        //    1 => 0,
+        //    _ => self.anim_state
+        //}
+        self.anim_state = (self.anim_state + 1) % 2;
     }
 
     fn get_delete(& self) -> bool { self.delete }
@@ -213,7 +260,7 @@ impl Cloud {
 impl Empty {
     fn get_sprite(&self) -> Sprite {
         //string_to_sprite(r#" .bk "#)
-        string_to_sprite(r#""#) // empty string has effect of making draw() do no-op.
+        string_to_sprite(r#""#, 0, 0) // empty string has effect of making draw() do no-op.
     }
 
     fn update(&mut self) {
@@ -227,7 +274,7 @@ impl Badkey {
         //string_to_sprite(r#" .bk "#)
         string_to_sprite(r#"
             █rr █rr █rr █rr
-        "#) // empty string has effect of making draw() do no-op.
+        "#, 0, 0) // empty string has effect of making draw() do no-op.
     }
 
     fn update(&mut self) {
@@ -236,13 +283,60 @@ impl Badkey {
     fn get_delete(& self) -> bool { self.delete }
 }
 
-//#[derive(Debug, Copy, Clone)]
+impl Grass {
+    fn get_sprite(&self) -> Sprite {
+        //string_to_sprite(r#" .bk "#)
+
+        //string_to_sprite(r#"
+        //    vgk,
+        //    "gk
+        //"#, 0, 0)
+
+        match self.fire {
+            false => string_to_sprite(r#"
+                vgk,
+                "gk
+            "#, 0, 0),
+            //true => string_to_sprite(r#"
+            //    #rk,
+            //    "yk
+            //"#, 0, 0),
+            true => match self.anim_state {
+                0 => string_to_sprite(r#"
+                    #rk,
+                    "yk
+                "#, 0, 0),
+                1 => string_to_sprite(r#"
+                    &rk,
+                    "rk
+                "#, 0, 0),
+                2 => string_to_sprite(r#"
+                    *yk,
+                    "rk
+                "#, 0, 0),
+                _ => string_to_sprite(r#"
+                    #rk,
+                    "yk
+                "#, 0, 0),
+            }
+            _ => string_to_sprite(r#"Owb"#, 0, 0),
+        }
+    }
+
+    fn update(&mut self) {
+        self.anim_state = (self.anim_state + 1) % 3;
+    }
+
+    fn get_delete(& self) -> bool { self.delete }
+}
+
 #[derive(Debug, Clone)]
 enum GridCell {
     Rd(Raindrop),
     Cd(Cloud),
     Em(Empty),
     Bk(Badkey),
+    Gs(Grass),
 }
 
 impl Default for GridCell{
@@ -277,6 +371,7 @@ impl GetSprite for GridCell {
             GridCell::Cd(cd) => cd.get_sprite(),
             GridCell::Em(em) => em.get_sprite(),
             GridCell::Bk(bk) => bk.get_sprite(),
+            GridCell::Gs(gs) => gs.get_sprite(),
         }
     }
 }
@@ -292,6 +387,7 @@ impl Update for GridCell {
             GridCell::Cd(cd) => cd.update(),
             GridCell::Em(em) => em.update(),
             GridCell::Bk(bk) => bk.update(),
+            GridCell::Gs(gs) => gs.update(),
         }
     }
 }
@@ -307,6 +403,7 @@ impl GetDelete for GridCell {
             GridCell::Cd(cd) => cd.get_delete(),
             GridCell::Em(em) => em.get_delete(),
             GridCell::Bk(bk) => bk.get_delete(),
+            GridCell::Gs(gs) => gs.get_delete(),
         }
     }
 }
@@ -459,6 +556,13 @@ impl Game{
     }
 
     fn place_cloud(&mut self){
+
+        // BUG:
+        // when i place a new cloud, i am already checking that the cloud
+        // will not collide with a cloud that comes to the right.
+        // however, i am not checking that the cloud does not collide with an
+        // existing cloud to the left.
+
         // this is probably not idiomatic.
         // but i don't want to bury the whole function in an if statement.
         if !self.word_pool.has_available(){ return; }
@@ -582,14 +686,24 @@ impl Game{
                         let (mut i_search, mut j_search) = (i+1, j);
                         while !matches!(&self.grid[i_search][j_search], GridCell::Cd(_)) && j_search > 0 {
                             j_search -= 1;
+                            //j_search -= 1000;
                         }
 
                         if let GridCell::Cd(cd) = &self.grid[i_search][j_search] {
                             let word_len = cd.word.len();
-                            if(j_search - 1 + word_len >= j){
+                            // CAUTION: if by some chance word_len is 0 and j_search is 0,
+                            // we will subtract 1 from a usize and cause a panic.
+                            if(j_search + word_len - 1 >= j){
                                 self.grid[i][j] = GridCell::default();
                                 continue;
                             }
+                        }
+
+                        // search for any other object below raindrop.
+                        if i +1 < m && !matches!(&self.grid[i+1][j], GridCell::Em(_)){
+                            // delete raindrop.
+                            self.grid[i][j] = GridCell::default();
+                            continue;
                         }
 
                         // move raindrop down one row.
@@ -608,6 +722,8 @@ impl Game{
                     GridCell::Em(em) => {
                     }
                     GridCell::Bk(bk) => {
+                    }
+                    GridCell::Gs(gs) => {
                     }
                 }
             }
@@ -770,6 +886,7 @@ impl Game{
     fn tear_down(&mut self) -> Result<()>{
         disable_raw_mode()?;
         execute!(self.out, LeaveAlternateScreen, Show, EnableLineWrap,)?;
+        queue!(self.out, Clear(ClearType::All), MoveTo(0,0))?;
         self.out.flush()?;
         println!("elts updated: {}", self.elts_updated);
         Ok(())
@@ -796,6 +913,15 @@ impl Game{
         //self.first_char_to_grid_coords.insert('c', (16, 22));
 
         //self.grid[0][32] = GridCell::Bk(Badkey{r:0, c:0, anim_state:0, delete:false});
+
+        //self.grid[2][2] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, delete:false});
+        let (m, n) = (self.grid.len(), self.grid[0].len());
+        for j in 0..n-1 {
+            self.grid[m-2][j] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire:false, delete:false});
+        }
+        self.grid[m-2][n-1] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire:true, delete:false});
+
+
 
         let tick_dur = Duration::from_millis(600);
         let time_beg = Instant::now();
