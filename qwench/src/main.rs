@@ -39,6 +39,13 @@ const HYDRATED: u8 = 6;
 const SPLASH_RADIUS: u8 = 3;
 const SPLASH_VAL:u8 = 12;
 
+#[derive(Debug, Clone)]
+enum GameState {
+    Play,
+    Quit,
+    GameOver,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct CanvasCell {
     ch: char,
@@ -190,6 +197,9 @@ struct Badkey { r: usize, c: usize, anim_state: i32, delete: bool }
 #[derive(Debug, Copy, Clone)]
 struct Grass { r: usize, c: usize, anim_state: i32, fire_resist: u8, delete: bool }
 
+#[derive(Debug, Clone)]
+struct GameOverMessage { r: usize, c: usize, anim_state: i32, word:String, idx:usize, delete: bool }
+
 impl Raindrop {
     fn get_sprite(&self) -> Sprite {
         // TODO: some savings are possible here if we precompute the sprite.
@@ -330,6 +340,28 @@ impl Grass {
     fn get_delete(& self) -> bool { self.delete }
 }
 
+impl GameOverMessage {
+    fn get_sprite(&self) -> Sprite {
+
+        let mut ret = String::new();
+        for i in 0..self.word.len() { ret += "~bw " }
+        ret += ",";
+        for (i, c) in self.word.chars().enumerate() {
+            ret += &c.to_string();
+            ret += "rw "
+        }
+        ret += ",";
+        for i in 0..self.word.len() { ret += "~bw " }
+
+        string_to_sprite(&ret, 0, 0)
+    }
+
+    fn update(&mut self) {
+    }
+
+    fn get_delete(& self) -> bool { self.delete }
+}
+
 #[derive(Debug, Clone)]
 enum GridCell {
     Rd(Raindrop),
@@ -337,6 +369,7 @@ enum GridCell {
     Em(Empty),
     Bk(Badkey),
     Gs(Grass),
+    Gm(GameOverMessage),
 }
 
 impl Default for GridCell{
@@ -372,6 +405,7 @@ impl GetSprite for GridCell {
             GridCell::Em(em) => em.get_sprite(),
             GridCell::Bk(bk) => bk.get_sprite(),
             GridCell::Gs(gs) => gs.get_sprite(),
+            GridCell::Gm(gm) => gm.get_sprite(),
         }
     }
 }
@@ -388,6 +422,7 @@ impl Update for GridCell {
             GridCell::Em(em) => em.update(),
             GridCell::Bk(bk) => bk.update(),
             GridCell::Gs(gs) => gs.update(),
+            GridCell::Gm(gm) => gm.update(),
         }
     }
 }
@@ -404,6 +439,7 @@ impl GetDelete for GridCell {
             GridCell::Em(em) => em.get_delete(),
             GridCell::Bk(bk) => bk.get_delete(),
             GridCell::Gs(gs) => gs.get_delete(),
+            GridCell::Gm(gm) => gm.get_delete(),
         }
     }
 }
@@ -490,6 +526,7 @@ impl WordPool {
 }
 
 struct Game {
+    game_state: GameState,
     ticks: u64,
     out: Box<dyn Write>,
     //grid: Vec<Vec<Option<GridCell>>>,
@@ -513,6 +550,7 @@ struct Game {
 impl Game{
     fn new(m: usize, n: usize, out: Box<dyn Write>, word_list: Vec<String>) -> Self{
         Game {
+            game_state: GameState::Play,
             ticks: 0,
             out,
             //grid: vec![vec![None; n]; m],
@@ -678,7 +716,10 @@ impl Game{
                     }
 
                     if let GridCell::Cd(cd) = &self.grid[i][k]{
-                        cloud_search_cur += cd.word.len();
+                        // decrement to account for increment that comes after iter_k.
+                        // but add 1 so words don't come immediately after each other?
+                        cloud_search_cur += cd.word.len() - 1;
+                        cloud_search_cur += 1;
                     }
 
                     if !matches!(self.grid[i][k], GridCell::Em(_)) {
@@ -701,7 +742,20 @@ impl Game{
         }
     }
 
-    fn update(&mut self) {
+    fn update(&mut self){
+        match self.game_state {
+            GameState::Play => { self.update_play(); },
+            GameState::GameOver => { self.update_game_over(); },
+            _ => { }
+        }
+    }
+
+    fn update_game_over(&mut self){
+        self.grid[2][2] = GridCell::Gm(GameOverMessage{
+            r:0, c:0, anim_state:0, idx:0, word:String::from("Game_Over"), delete:false});
+    }
+
+    fn update_play(&mut self) {
         self.ticks += 1;
 
         // NOTE: update_applied must be cleared before placing raindrops or clouds.
@@ -820,7 +874,23 @@ impl Game{
                         }
                         self.grid[i][j] = GridCell::Gs(tmp);
                     }
+                    GridCell::Gm(gm) => {
+                    }
                 }
+            }
+        }
+
+        // make sure the rightmost grass cell is always on fire.
+        if let GridCell::Gs(gs) = &self.grid[m-2][n-1] {
+            let mut tmp = gs.clone();
+            tmp.fire_resist = 0;
+            self.grid[m-2][n-1] = GridCell::Gs(tmp);
+        }
+
+        // check condition for game end.
+        if let GridCell::Gs(gs) = &self.grid[m-2][0] {
+            if gs.fire_resist == 0{
+                self.game_state = GameState::GameOver;
             }
         }
     }
@@ -1023,25 +1093,34 @@ impl Game{
         //self.grid[0][32] = GridCell::Bk(Badkey{r:0, c:0, anim_state:0, delete:false});
 
         //self.grid[2][2] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, delete:false});
+
+        // TODO: board setup should itself be a game state.
+        // this state should precede PlayGame.
+
         let (m, n) = (self.grid.len(), self.grid[0].len());
-        for j in 0..n-1 {
+        for j in 0..n {
             self.grid[m-2][j] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire_resist:4, delete:false});
+            //self.grid[m-2][j] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire_resist:1, delete:false});
         }
-        self.grid[m-2][n-1] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire_resist:0, delete:false});
+        //self.grid[m-2][n-1] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire_resist:0, delete:false});
 
-        for j in n-10..n-4{
-            self.grid[m-2][j] = GridCell::Gs(Grass{
-                r:0, c:0, anim_state:0, fire_resist:SPLASH_VAL, delete:false});
-        }
+        //for j in n-10..n-4{
+        //    self.grid[m-2][j] = GridCell::Gs(Grass{
+        //        r:0, c:0, anim_state:0, fire_resist:SPLASH_VAL, delete:false});
+        //}
 
-        let tick_dur = Duration::from_millis(600);
+        self.grid[m-2][2] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire_resist:0, delete:false});
+
+        //let tick_dur = Duration::from_millis(600);
+        let tick_dur = Duration::from_millis(100);
         let time_beg = Instant::now();
-        let mut quit = false;
+        //let mut quit = false;
         let mut remaining_dur = tick_dur;
 
         //let mut key_presses = 0;
 
-        while !quit {
+        //while !quit {
+        while !matches!(self.game_state, GameState::Quit) {
             // TODO: implement a delay for when bad press happens.
             // the delay should not allow key presses to accumulate.
             // keys pressed during a bad press delay should be discarded.
@@ -1059,13 +1138,16 @@ impl Game{
                     //if event.code == KeyCode::Char('q') {
 
                     if event.code == KeyCode::Esc {
-                        quit = true;
+                        //quit = true;
+                        self.game_state = GameState::Quit;
                     }
                     else{
                         if event.kind == KeyEventKind::Press{
                             if let KeyCode::Char(c) = event.code{
                                 //self.char_fifo.push_back(c);
-                                self.handle_key_press(c);
+                                if matches!(self.game_state, GameState::Play){
+                                    self.handle_key_press(c);
+                                }
                             }
                         }
                     }

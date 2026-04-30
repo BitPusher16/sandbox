@@ -23,3 +23,5 @@
 
 - absolutely need a high score function.
 - high score should scale with speed. and also reward diverse character sets?
+
+- find a way to restore terminal config if user quits with ctrl-c?
