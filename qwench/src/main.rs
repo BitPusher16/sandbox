@@ -21,7 +21,6 @@ use crossterm::terminal::{
 use crossterm::cursor;
 
 use rand::prelude::*;
-//use rand::rngs::StdRng;
 use rand::SeedableRng;
 
 mod word_list;
@@ -29,6 +28,16 @@ use crate::word_list::get_word_list;
 
 const MIN_COLS: usize = 144;
 const MIN_ROWS: usize = 48;
+const MAX_WORD_LEN: usize = 10;
+
+// at or above hydration level HYDRATED,
+// fire does not affect fire_risk,
+// and update() decrements fire_risk.
+const HYDRATED: u8 = 6;
+
+// how many grass tiles on each side of a landing raindrop get watered.
+const SPLASH_RADIUS: u8 = 3;
+const SPLASH_VAL:u8 = 12;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct CanvasCell {
@@ -179,7 +188,7 @@ struct Empty { r: usize, c: usize, anim_state: i32, delete: bool }
 struct Badkey { r: usize, c: usize, anim_state: i32, delete: bool }
 
 #[derive(Debug, Copy, Clone)]
-struct Grass { r: usize, c: usize, anim_state: i32, fire: bool, delete: bool }
+struct Grass { r: usize, c: usize, anim_state: i32, fire_resist: u8, delete: bool }
 
 impl Raindrop {
     fn get_sprite(&self) -> Sprite {
@@ -285,46 +294,37 @@ impl Badkey {
 
 impl Grass {
     fn get_sprite(&self) -> Sprite {
-        //string_to_sprite(r#" .bk "#)
 
-        //string_to_sprite(r#"
-        //    vgk,
-        //    "gk
-        //"#, 0, 0)
-
-        match self.fire {
-            false => string_to_sprite(r#"
+        match self.fire_resist {
+            0 => match self.anim_state {
+                0 => string_to_sprite(r#"
+                    #rk,
+                    "rk
+                "#, 0, 0),
+                1 => string_to_sprite(r#"
+                    &yk,
+                    "rk
+                "#, 0, 0),
+                _ => string_to_sprite(r#" "#, 0, 0),
+            },
+            1..=2 => string_to_sprite(r#"
+                vyk,
+                "yk
+            "#, 0, 0),
+            HYDRATED.. => string_to_sprite(r#"
+                vgk,
+                "gb
+            "#, 0, 0),
+            _ => string_to_sprite(r#"
                 vgk,
                 "gk
             "#, 0, 0),
-            //true => string_to_sprite(r#"
-            //    #rk,
-            //    "yk
-            //"#, 0, 0),
-            true => match self.anim_state {
-                0 => string_to_sprite(r#"
-                    #rk,
-                    "yk
-                "#, 0, 0),
-                1 => string_to_sprite(r#"
-                    &rk,
-                    "rk
-                "#, 0, 0),
-                2 => string_to_sprite(r#"
-                    *yk,
-                    "rk
-                "#, 0, 0),
-                _ => string_to_sprite(r#"
-                    #rk,
-                    "yk
-                "#, 0, 0),
-            }
-            _ => string_to_sprite(r#"Owb"#, 0, 0),
         }
     }
 
     fn update(&mut self) {
-        self.anim_state = (self.anim_state + 1) % 3;
+        self.anim_state = (self.anim_state + 1) % 2;
+        if self.fire_resist >= HYDRATED { self.fire_resist -= 1; }
     }
 
     fn get_delete(& self) -> bool { self.delete }
@@ -572,15 +572,73 @@ impl Game{
 
         //if let Some(word) = self.word_pool.get(&mut self.rng){ }
 
-        // no clouds first row. no clouds last 3 rows.
+        // no clouds first row. no clouds last 4 rows.
         let cloud_min: usize = n;
-        let cloud_max: usize = (m*n) - (3*n);
+        let cloud_max: usize = (m*n) - (4*n);
 
         let cloud_search_begin: usize = self.rng.random_range(cloud_min..cloud_max);
         let mut cloud_search_cur = cloud_search_begin;
-        //self.debug_vec.push(format!("search {cloud_search_begin}").to_string());
 
-        'iter_cloud_cells: loop{
+        //let (p, q) = (cloud_search_cur / n, cloud_search_cur % n);
+        //self.debug_vec.push(format!("cur{p},{q}").to_string());
+
+        // just once, walk backwards and confirm no object preceding.
+        // if cloud found, check that cloud's length and jump to the end of it.
+        let mut cloud_search_rev = cloud_search_cur;
+        loop{
+            let (i, j) = (cloud_search_rev / n, cloud_search_rev % n);
+
+            // searched back far enough, found nothing.
+            if( 
+                cloud_search_cur - cloud_search_rev == MAX_WORD_LEN
+                && matches!(self.grid[i][j], GridCell::Em(_))
+            ){ 
+                //self.debug_vec.push(format!("enough {i},{j}").to_string());
+                break;
+            }
+
+            // searched back far enough, reached first possible cloud position.
+            if( 
+                cloud_search_cur - cloud_search_rev == MAX_WORD_LEN
+                && cloud_search_rev == cloud_min
+            ){ 
+                //self.debug_vec.push(format!("first {i},{j}").to_string());
+                break; 
+            }
+
+            // reached beginning of row, is empty.
+            if( 
+                (cloud_search_rev % n) == 0
+                && matches!(self.grid[i][j], GridCell::Em(_))
+            ){ 
+                //self.debug_vec.push(format!("reached row beg at {i},{j}").to_string());
+                break;
+            }
+
+            // encountered raindrop.
+            // assume that raindrop does not exist in area covered by any cloud.
+            if let GridCell::Rd(rd) = &self.grid[i][j]{
+                //self.debug_vec.push(format!("raindrop {i},{j}").to_string());
+                cloud_search_cur = max(cloud_search_cur, cloud_search_rev + 1);
+                break;
+            }
+
+            // encountered cloud;
+            if let GridCell::Cd(cd) = &self.grid[i][j]{
+                //self.debug_vec.push(format!("hit cloud at {i},{j}").to_string());
+                cloud_search_cur = max(cloud_search_cur, cloud_search_rev + cd.word.len());
+                break;
+            }
+
+            if let GridCell::Em(em) = &self.grid[i][j]{
+                //self.debug_vec.push(format!("n{i},{j}").to_string());
+                cloud_search_rev -= 1;
+            }
+        }
+
+
+
+        'iter_i_j: loop{
             let (i, j) = (cloud_search_cur / n, cloud_search_cur % n);
             //self.debug_vec.push(format!("considering {i},{j}").to_string());
 
@@ -590,7 +648,7 @@ impl Game{
                 // bump index up to the location of obstacle.
 
                 let mut k = j + 1;
-                'iter_word_space: loop {
+                'iter_k: loop {
 
                     if (k - j) == word.len(){
                         // we have space for the word.
@@ -601,7 +659,7 @@ impl Game{
                         if let Some(ch) = word.chars().next(){
                             self.first_char_to_grid_coords.insert(ch, (i, j));
                         }
-                        break 'iter_cloud_cells;
+                        break 'iter_i_j;
                     }
 
                     // reached end of row.
@@ -610,12 +668,17 @@ impl Game{
                         break;
                     }
 
-                    if i*n + j == cloud_search_begin {
+                    if i*n + k == cloud_search_begin {
                         // we are about to run out of places to fit new cloud.
-                        // quit early to simplify bump logic.
+                        // technically still possible the word could fit.
+                        // but quit early to simplify bump logic.
                         // decrement by one so the outer loop increment hits exit.
                         cloud_search_cur += (k - j - 1);
                         break;
+                    }
+
+                    if let GridCell::Cd(cd) = &self.grid[i][k]{
+                        cloud_search_cur += cd.word.len();
                     }
 
                     if !matches!(self.grid[i][k], GridCell::Em(_)) {
@@ -685,8 +748,8 @@ impl Game{
 
                         let (mut i_search, mut j_search) = (i+1, j);
                         while !matches!(&self.grid[i_search][j_search], GridCell::Cd(_)) && j_search > 0 {
-                            //j_search -= 1;
-                            j_search -= 1000;
+                            j_search -= 1;
+                            //j_search -= 1000; // uncomment to test panic hook in terminal.
                         }
 
                         if let GridCell::Cd(cd) = &self.grid[i_search][j_search] {
@@ -699,14 +762,31 @@ impl Game{
                             }
                         }
 
-                        // search for any other object below raindrop.
+                        // search for grass immediately below raindrop.
+                        // if found, hydrate within splash radius.
+
+                        if i+1 < m && matches!(&self.grid[i+1][j], GridCell::Gs(_)){
+                            let (i_gs, mut j_gs) = (i+1, j.saturating_sub(SPLASH_RADIUS as usize));
+                            while j_gs < n && j_gs <= j.saturating_add(SPLASH_RADIUS as usize){
+                                if let GridCell::Gs(mut gs) = self.grid[i_gs][j_gs].clone(){
+                                    gs.fire_resist = SPLASH_VAL;
+                                    self.grid[i_gs][j_gs] = GridCell::Gs(gs);
+                                    self.update_applied[i_gs][j_gs] = true;
+                                }
+
+                                j_gs += 1;
+                            }
+                            // do not continue. fall through so that raindrop gets deleted.
+                        }
+
+                        // search for any non-empty object below raindrop.
                         if i +1 < m && !matches!(&self.grid[i+1][j], GridCell::Em(_)){
                             // delete raindrop.
                             self.grid[i][j] = GridCell::default();
                             continue;
                         }
 
-                        // move raindrop down one row.
+                        // no objects encountered. move raindrop down one row.
 
                         //self.grid[i+1][j] = self.grid[i][j];
                         //self.grid[i+i][j] = GridCell::Rd(rd);
@@ -724,6 +804,21 @@ impl Game{
                     GridCell::Bk(bk) => {
                     }
                     GridCell::Gs(gs) => {
+                        // can't find a way to edit gs directly. clone instead.
+                        let mut tmp = gs.clone();
+                        if j+1 < n && let GridCell::Gs(gs_r) = self.grid[i][j+1] {
+                            if tmp.fire_resist > 0 && tmp.fire_resist < HYDRATED && gs_r.fire_resist == 0 {
+                                tmp.fire_resist -= 1;
+                                self.grid[i][j] = GridCell::Gs(tmp);
+                            }
+                        }
+                        if j > 0 && let GridCell::Gs(gs_l) = self.grid[i][j-1] {
+                            if tmp.fire_resist > 0 && tmp.fire_resist < HYDRATED && gs_l.fire_resist == 0 {
+                                tmp.fire_resist -= 1;
+                                self.grid[i][j] = GridCell::Gs(tmp);
+                            }
+                        }
+                        self.grid[i][j] = GridCell::Gs(tmp);
                     }
                 }
             }
@@ -793,7 +888,20 @@ impl Game{
             //execute!(self.out, Print("foo"))?;
             //execute!(self.out, Print(format!("{:?}", self.char_fifo)))?;
             //queue!(self.out, Print(format!("{:?}", self.char_fifo)))?;
-            queue!(self.out, Print(format!("{:?}", self.debug_vec)))?;
+
+            //queue!(self.out, Print(format!("{:?}", self.debug_vec)))?;
+
+            let n = 16;
+            let inner: String = self.debug_vec .iter() .enumerate() .map(|(i, item)| {
+                if i > 0 && i % n == 0 {
+                    // Start a new line + indentation when we hit every nth element
+                    format!("\r\n  {:?}", item)
+                } else {
+                    format!("{:?}", item)
+                }
+            }) .collect::<Vec<_>>() .join(", ");
+            let formatted = format!("\r[{}]", inner);
+            queue!(self.out, Print(formatted))?;
 
             queue!(self.out, EndSynchronizedUpdate)?;
             self.out.flush()?;
@@ -917,11 +1025,14 @@ impl Game{
         //self.grid[2][2] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, delete:false});
         let (m, n) = (self.grid.len(), self.grid[0].len());
         for j in 0..n-1 {
-            self.grid[m-2][j] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire:false, delete:false});
+            self.grid[m-2][j] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire_resist:4, delete:false});
         }
-        self.grid[m-2][n-1] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire:true, delete:false});
+        self.grid[m-2][n-1] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire_resist:0, delete:false});
 
-
+        for j in n-10..n-4{
+            self.grid[m-2][j] = GridCell::Gs(Grass{
+                r:0, c:0, anim_state:0, fire_resist:SPLASH_VAL, delete:false});
+        }
 
         let tick_dur = Duration::from_millis(600);
         let time_beg = Instant::now();
@@ -979,10 +1090,11 @@ impl Game{
         // set up panic hook before enabling raw mode.
         let default_hook = panic::take_hook();
         panic::set_hook(Box::new(move |info| {
-            // Best-effort teardown — ignore errors
+            // best effort teardown. ignore errors.
             let _ = disable_raw_mode();
             let _ = execute!(
-                // note: stderr, not stdout.
+                // NOTE: stderr, not stdout.
+                // stdout also works.
                 io::stderr(),
                 LeaveAlternateScreen,
                 Show,
