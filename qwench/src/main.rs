@@ -23,17 +23,24 @@ use crossterm::cursor;
 use rand::prelude::*;
 use rand::SeedableRng;
 
+mod symbol_list;
+use crate::symbol_list::get_symbol_list;
+
 mod word_list;
 use crate::word_list::get_word_list;
 
 const MIN_COLS: usize = 144;
 const MIN_ROWS: usize = 48;
 const MAX_WORD_LEN: usize = 10;
+//const MS_PER_TICK: u64 = 250;
+const MS_PER_TICK: u64 = 500;
+const GAME_LENGTH_SEC: u64 = 2 * 60;
+//const GAME_LENGTH_SEC: u64 = 4;
 
-// at or above hydration level HYDRATED,
+// at or above hydration level WATERLOGGED,
 // fire does not affect fire_risk,
 // and update() decrements fire_risk.
-const HYDRATED: u8 = 6;
+const WATERLOGGED: u8 = 6;
 
 // how many grass tiles on each side of a landing raindrop get watered.
 const SPLASH_RADIUS: u8 = 3;
@@ -43,7 +50,8 @@ const SPLASH_VAL:u8 = 12;
 enum GameState {
     Play,
     Quit,
-    GameOver,
+    GameLost,
+    GameWon,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -183,22 +191,28 @@ fn string_to_sprite(input: &str, shift_up: usize, shift_left: usize) -> Sprite {
 }
 
 #[derive(Debug, Copy, Clone)]
-struct Raindrop { r: usize, c: usize, anim_state: i32, delete: bool }
+struct Raindrop { anim_state: i32, delete: bool }
 
 #[derive(Debug, Clone)]
-struct Cloud { r: usize, c: usize, anim_state: i32, word:String, idx:usize, delete: bool }
+struct Cloud { anim_state: i32, word:String, idx:usize, delete: bool }
 
 #[derive(Debug, Copy, Clone)]
-struct Empty { r: usize, c: usize, anim_state: i32, delete: bool }
+struct Empty { anim_state: i32, delete: bool }
 
 #[derive(Debug, Copy, Clone)]
-struct Badkey { r: usize, c: usize, anim_state: i32, delete: bool }
+struct Badkey { anim_state: i32, delete: bool }
 
 #[derive(Debug, Copy, Clone)]
-struct Grass { r: usize, c: usize, anim_state: i32, fire_resist: u8, delete: bool }
+struct Grass { anim_state: i32, fire_resist: u8, delete: bool }
 
 #[derive(Debug, Clone)]
-struct GameOverMessage { r: usize, c: usize, anim_state: i32, word:String, idx:usize, delete: bool }
+struct GameOverMessage { anim_state: i32, word:String, idx:usize, delete: bool }
+
+#[derive(Debug, Clone)]
+struct Clock { anim_state: i32, ms_remaining:u64, delete: bool }
+
+#[derive(Debug, Clone)]
+struct Score { anim_state: i32, hit:u64, miss:u64, delete: bool }
 
 impl Raindrop {
     fn get_sprite(&self) -> Sprite {
@@ -315,13 +329,21 @@ impl Grass {
                     &yk,
                     "rk
                 "#, 0, 0),
+                2 => string_to_sprite(r#"
+                    %yk,
+                    "rk
+                "#, 0, 0),
+                3 => string_to_sprite(r#"
+                    *yk,
+                    "rk
+                "#, 0, 0),
                 _ => string_to_sprite(r#" "#, 0, 0),
             },
             1..=2 => string_to_sprite(r#"
                 vyk,
                 "yk
             "#, 0, 0),
-            HYDRATED.. => string_to_sprite(r#"
+            WATERLOGGED.. => string_to_sprite(r#"
                 vgk,
                 "gb
             "#, 0, 0),
@@ -333,8 +355,8 @@ impl Grass {
     }
 
     fn update(&mut self) {
-        self.anim_state = (self.anim_state + 1) % 2;
-        if self.fire_resist >= HYDRATED { self.fire_resist -= 1; }
+        self.anim_state = (self.anim_state + 1) % 4;
+        if self.fire_resist >= WATERLOGGED { self.fire_resist -= 1; }
     }
 
     fn get_delete(& self) -> bool { self.delete }
@@ -362,6 +384,60 @@ impl GameOverMessage {
     fn get_delete(& self) -> bool { self.delete }
 }
 
+impl Clock {
+    fn get_sprite(&self) -> Sprite {
+        let total_seconds = self.ms_remaining / 1000;
+        let minutes = total_seconds / 60;
+        let seconds = total_seconds % 60;
+
+        let time_str = format!("{:02}:{:02}", minutes, seconds);
+
+        let mut ret = String::new();
+        for ch in time_str.chars() {
+            ret.push(ch);
+            ret.push('w');  // white foreground
+            ret.push('k');  // black background
+        }
+
+        string_to_sprite(&ret, 0, 0)
+    }
+
+    fn update(&mut self) { }
+
+    fn get_delete(& self) -> bool { self.delete }
+}
+
+impl Score {
+    fn get_sprite(&self) -> Sprite {
+        let score_str = format!("{:04}:{:04}", self.hit, self.miss);
+
+        let mut ret = String::new();
+        let mut is_hit_section = true;
+
+        for ch in score_str.chars() {
+            if ch == ':' {
+                is_hit_section = false;
+                // colon stays neutral white on black
+                ret.push(ch);
+                ret.push('w');
+                ret.push('k');
+                continue;
+            }
+
+            let fg = if is_hit_section { 'g' } else { 'r' }; // green for hits, red for misses
+
+            ret.push(ch);
+            ret.push(fg);
+            ret.push('k'); // black background for everything
+        }
+
+        string_to_sprite(&ret, 0, 0)
+    }
+
+    fn update(&mut self) { }
+
+    fn get_delete(& self) -> bool { self.delete }
+}
 #[derive(Debug, Clone)]
 enum GridCell {
     Rd(Raindrop),
@@ -370,11 +446,13 @@ enum GridCell {
     Bk(Badkey),
     Gs(Grass),
     Gm(GameOverMessage),
+    Ck(Clock),
+    Sc(Score),
 }
 
 impl Default for GridCell{
     fn default() -> Self {
-        GridCell::Em(Empty {r:0, c:0, anim_state:0, delete:false})
+        GridCell::Em(Empty {anim_state:0, delete:false})
     }
 }
 
@@ -406,6 +484,8 @@ impl GetSprite for GridCell {
             GridCell::Bk(bk) => bk.get_sprite(),
             GridCell::Gs(gs) => gs.get_sprite(),
             GridCell::Gm(gm) => gm.get_sprite(),
+            GridCell::Ck(ck) => ck.get_sprite(),
+            GridCell::Sc(sc) => sc.get_sprite(),
         }
     }
 }
@@ -423,6 +503,8 @@ impl Update for GridCell {
             GridCell::Bk(bk) => bk.update(),
             GridCell::Gs(gs) => gs.update(),
             GridCell::Gm(gm) => gm.update(),
+            GridCell::Ck(ck) => ck.update(),
+            GridCell::Sc(sc) => sc.update(),
         }
     }
 }
@@ -440,6 +522,8 @@ impl GetDelete for GridCell {
             GridCell::Bk(bk) => bk.get_delete(),
             GridCell::Gs(gs) => gs.get_delete(),
             GridCell::Gm(gm) => gm.get_delete(),
+            GridCell::Ck(ck) => ck.get_delete(),
+            GridCell::Sc(sc) => sc.get_delete(),
         }
     }
 }
@@ -525,13 +609,102 @@ impl WordPool {
     }
 }
 
+#[derive(Debug)]
+pub struct SymbolPool {
+    groups: BTreeMap<char, Vec<char>>,
+    available_starts: Vec<char>,
+    min_length: usize,
+    max_length: usize,
+}
+
+impl SymbolPool {
+    pub fn new(symbols: Vec<char>, min_length: usize, max_length: usize) -> Self {
+        let mut groups: BTreeMap<char, Vec<char>> = BTreeMap::new();
+
+        for sym in symbols {
+            groups.entry(sym).or_default().push(sym);
+        }
+
+        // Same deterministic order as WordPool (BTreeMap keys are sorted)
+        let available_starts: Vec<char> = groups.keys().cloned().collect();
+
+        Self {
+            groups,
+            available_starts,
+            min_length,
+            max_length,
+        }
+    }
+
+    fn pick_random_symbol(&self, rng: &mut impl Rng) -> Option<char> {
+        let total: usize = self.groups.values().map(|v| v.len()).sum();
+        if total == 0 {
+            return None;
+        }
+
+        let mut pick = rng.random_range(0..total);
+        for (&ch, list) in &self.groups {
+            let len = list.len();
+            if pick < len {
+                return Some(ch);
+            }
+            pick -= len;
+        }
+        None
+    }
+
+    pub fn get(&mut self, rng: &mut impl Rng) -> Option<String> {
+        if self.available_starts.is_empty() {
+            return None;
+        }
+
+        // Exactly as in WordPool: pre-select and consume one available start
+        let idx = rng.random_range(0..self.available_starts.len());
+        let chosen_char = self.available_starts.swap_remove(idx);
+
+        // Generate the word: starts with the chosen start symbol
+        let length = rng.random_range(self.min_length..=self.max_length);
+        let mut word = String::with_capacity(length);
+        word.push(chosen_char);
+
+        // Remainder symbols are drawn (sampled with multiplicity) from the full symbol pool.
+        // Groups are never mutated — only the starting symbol is "in-use" (mirrors WordPool exactly).
+        for _ in 1..length {
+            if let Some(sym) = self.pick_random_symbol(rng) {
+                word.push(sym);
+            } else {
+                break;
+            }
+        }
+
+        Some(word)
+    }
+
+    pub fn put(&mut self, c: char) {
+        // Only the starting symbol is returned to the pool of available starts
+        if self.groups.contains_key(&c) && !self.available_starts.contains(&c) {
+            self.available_starts.push(c);
+        }
+    }
+
+    pub fn available_count(&self) -> usize {
+        self.available_starts.len()
+    }
+
+    pub fn has_available(&self) -> bool {
+        !self.available_starts.is_empty()
+    }
+
+    pub fn exists_in_available_starts(&self, c: char) -> bool {
+        self.available_starts.contains(&c)
+    }
+}
+
 struct Game {
     game_state: GameState,
     ticks: u64,
     out: Box<dyn Write>,
-    //grid: Vec<Vec<Option<GridCell>>>,
     grid: Vec<Vec<GridCell>>,
-    //next_grid: Vec<Vec<GridCell>>,
     update_applied: Vec<Vec<bool>>,
     canvas: Vec<Vec<CanvasCell>>,
     top_left_r: usize,
@@ -541,22 +714,22 @@ struct Game {
     first_char_to_grid_coords: HashMap<char, (usize, usize)>,
     active_cloud_coords: (usize, usize),
     quit: bool,
+    key_hit: u64,
+    key_miss: u64,
     bad_press: bool,
     rng: StdRng,
     word_pool: WordPool,
+    symbol_pool: SymbolPool,
     debug_vec: Vec<String>,
 }
 
 impl Game{
-    fn new(m: usize, n: usize, out: Box<dyn Write>, word_list: Vec<String>) -> Self{
+    fn new(m: usize, n: usize, out: Box<dyn Write>, word_list: Vec<String>, symbol_list: Vec<char>) -> Self{
         Game {
             game_state: GameState::Play,
             ticks: 0,
             out,
-            //grid: vec![vec![None; n]; m],
-            //grid: vec![vec![GridCell.default(); n]; m],
             grid: vec![vec![GridCell::default(); n]; m],
-            //next_grid: vec![vec![GridCell::default(); n]; m],
             update_applied: vec![vec![false; n]; m],
             canvas: vec![vec![CanvasCell::default(); n]; m],
             top_left_r: 0,
@@ -567,9 +740,12 @@ impl Game{
             // NOTE: (0, 0) means DNE. no cloud will spawn with those coords.
             active_cloud_coords: (0, 0), 
             quit: false,
+            key_hit: 0,
+            key_miss: 0,
             bad_press: false,
             rng: SeedableRng::seed_from_u64(8),
             word_pool: WordPool::new(word_list),
+            symbol_pool: SymbolPool::new(symbol_list, 4, 6),
             debug_vec: Vec::new()
         }
     }
@@ -583,7 +759,7 @@ impl Game{
         loop {
             if let GridCell::Em(em) = &self.grid[0][raindrop_search_cur] {
                 self.grid[0][raindrop_search_cur] = 
-                    GridCell::Rd(Raindrop{r:0, c:0, anim_state:0, delete:false});
+                    GridCell::Rd(Raindrop{anim_state:0, delete:false});
                 self.update_applied[0][raindrop_search_cur] = true;
                 break;
             }
@@ -595,16 +771,28 @@ impl Game{
 
     fn place_cloud(&mut self){
 
-        // BUG:
-        // when i place a new cloud, i am already checking that the cloud
-        // will not collide with a cloud that comes to the right.
-        // however, i am not checking that the cloud does not collide with an
-        // existing cloud to the left.
+        let mut word:String = "foo".to_string();
+        // BUG: do not use modulo here. place_cloud() is only called for certain moduli.
+        //if self.ticks % 6 == 5 {
+        if 1 == 0 {
+            // add some symbols
+            self.debug_vec.push(format!("adding symbols"));
+            if !self.symbol_pool.has_available(){ return; }
+            //let word = self.symbol_pool.get(&mut self.rng).unwrap_or("error".to_string());
+            word = self.symbol_pool.get(&mut self.rng).unwrap_or("error".to_string());
+        }
+        else{
+            // add a word.
 
-        // this is probably not idiomatic.
-        // but i don't want to bury the whole function in an if statement.
-        if !self.word_pool.has_available(){ return; }
-        let word = self.word_pool.get(&mut self.rng).unwrap_or("error".to_string());
+            // this is probably not idiomatic.
+            // but i don't want to bury the whole function in an if statement.
+            if !self.word_pool.has_available(){ return; }
+            //let word = self.word_pool.get(&mut self.rng).unwrap_or("error".to_string());
+            word = self.word_pool.get(&mut self.rng).unwrap_or("error".to_string());
+        }
+
+        //let word = "bar".to_string();
+
 
         let (m, n) = (self.grid.len(), self.grid[0].len());
 
@@ -692,7 +880,7 @@ impl Game{
                         // we have space for the word.
                         // place word now? or better after loop?
 
-                        self.grid[i][j] = GridCell::Cd(Cloud{r:0, c:0, anim_state:0, 
+                        self.grid[i][j] = GridCell::Cd(Cloud{anim_state:0, 
                             word:word.clone(), idx:0, delete:false});
                         if let Some(ch) = word.chars().next(){
                             self.first_char_to_grid_coords.insert(ch, (i, j));
@@ -745,14 +933,21 @@ impl Game{
     fn update(&mut self){
         match self.game_state {
             GameState::Play => { self.update_play(); },
-            GameState::GameOver => { self.update_game_over(); },
-            _ => { }
+            GameState::GameLost => { self.update_game_lost(); },
+            GameState::GameWon => { self.update_game_won(); },
+            GameState::Quit => { },
+            //_ => { }
         }
     }
 
-    fn update_game_over(&mut self){
-        self.grid[2][2] = GridCell::Gm(GameOverMessage{
-            r:0, c:0, anim_state:0, idx:0, word:String::from("Game_Over"), delete:false});
+    fn update_game_lost(&mut self){
+        self.grid[20][64] = GridCell::Gm(GameOverMessage{
+            anim_state:0, idx:0, word:String::from("Game_Lost"), delete:false});
+    }
+
+    fn update_game_won(&mut self){
+        self.grid[20][64] = GridCell::Gm(GameOverMessage{
+            anim_state:0, idx:0, word:String::from("Game_Won"), delete:false});
     }
 
     fn update_play(&mut self) {
@@ -861,13 +1056,13 @@ impl Game{
                         // can't find a way to edit gs directly. clone instead.
                         let mut tmp = gs.clone();
                         if j+1 < n && let GridCell::Gs(gs_r) = self.grid[i][j+1] {
-                            if tmp.fire_resist > 0 && tmp.fire_resist < HYDRATED && gs_r.fire_resist == 0 {
+                            if tmp.fire_resist > 0 && tmp.fire_resist < WATERLOGGED && gs_r.fire_resist == 0 {
                                 tmp.fire_resist -= 1;
                                 self.grid[i][j] = GridCell::Gs(tmp);
                             }
                         }
                         if j > 0 && let GridCell::Gs(gs_l) = self.grid[i][j-1] {
-                            if tmp.fire_resist > 0 && tmp.fire_resist < HYDRATED && gs_l.fire_resist == 0 {
+                            if tmp.fire_resist > 0 && tmp.fire_resist < WATERLOGGED && gs_l.fire_resist == 0 {
                                 tmp.fire_resist -= 1;
                                 self.grid[i][j] = GridCell::Gs(tmp);
                             }
@@ -875,6 +1070,17 @@ impl Game{
                         self.grid[i][j] = GridCell::Gs(tmp);
                     }
                     GridCell::Gm(gm) => {
+                    }
+                    GridCell::Ck(ck) => {
+                        let mut tmp = ck.clone();
+                        tmp.ms_remaining = (GAME_LENGTH_SEC * 1000) - (self.ticks * MS_PER_TICK);
+                        self.grid[i][j] = GridCell::Ck(tmp);
+                    }
+                    GridCell::Sc(sc) => {
+                        let mut tmp = sc.clone();
+                        tmp.hit = self.key_hit;
+                        tmp.miss = self.key_miss;
+                        self.grid[i][j] = GridCell::Sc(tmp);
                     }
                 }
             }
@@ -887,11 +1093,16 @@ impl Game{
             self.grid[m-2][n-1] = GridCell::Gs(tmp);
         }
 
-        // check condition for game end.
+        // check condition for game lost.
         if let GridCell::Gs(gs) = &self.grid[m-2][0] {
             if gs.fire_resist == 0{
-                self.game_state = GameState::GameOver;
+                self.game_state = GameState::GameLost;
             }
+        }
+
+        // check condition for game won.
+        if self.ticks * MS_PER_TICK >= (GAME_LENGTH_SEC * 1000){
+            self.game_state = GameState::GameWon
         }
     }
 
@@ -1002,11 +1213,13 @@ impl Game{
                 if let GridCell::Cd(cd) = &mut self.grid[active_i][active_j]{
                     inc_index = true;
                 }
+                self.key_hit += 1;
             }
             else{
                 // no cloud is active,
                 // and user typed a char with no mapped cloud.
                 self.bad_press = true;
+                self.key_miss += 1;
             }
         }
         else{
@@ -1017,9 +1230,11 @@ impl Game{
                     if ch == c {
                         // the user's press matches the next letter in the word.
                         inc_index = true;
+                        self.key_hit += 1;
                     }
                     else{
                         self.bad_press = true;
+                        self.key_miss += 1;
                     }
                 }
             }
@@ -1099,7 +1314,9 @@ impl Game{
 
         let (m, n) = (self.grid.len(), self.grid[0].len());
         for j in 0..n {
-            self.grid[m-2][j] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire_resist:4, delete:false});
+            self.grid[m-2][j] = GridCell::Gs(Grass{
+                anim_state:self.rng.random_range(0..3), fire_resist:4, delete:false});
+            //let idx = rng.random_range(0..self.available_starts.len());
             //self.grid[m-2][j] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire_resist:1, delete:false});
         }
         //self.grid[m-2][n-1] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire_resist:0, delete:false});
@@ -1109,10 +1326,17 @@ impl Game{
         //        r:0, c:0, anim_state:0, fire_resist:SPLASH_VAL, delete:false});
         //}
 
-        self.grid[m-2][2] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire_resist:0, delete:false});
+        // this line will create fire near the left side, for testing game over.
+        //self.grid[m-2][2] = GridCell::Gs(Grass{r:0, c:0, anim_state:0, fire_resist:0, delete:false});
+
+        // create clock
+        self.grid[0][0] = GridCell::Ck(Clock{anim_state:0, ms_remaining:0, delete:false});
+
+        // create score
+        self.grid[0][n-9] = GridCell::Sc(Score{anim_state:0, hit:0, miss:0, delete:false});
 
         //let tick_dur = Duration::from_millis(600);
-        let tick_dur = Duration::from_millis(100);
+        let tick_dur = Duration::from_millis(MS_PER_TICK);
         let time_beg = Instant::now();
         //let mut quit = false;
         let mut remaining_dur = tick_dur;
@@ -1206,7 +1430,8 @@ fn main() -> Result<()> {
     let cols = MIN_COLS;
     //let word_list = read_words_from_disk();
     let word_list = word_list::get_word_list();
-    let mut game = Game::new(rows, cols, Box::new(io::stdout()), word_list);
+    let symbol_list = symbol_list::get_symbol_list();
+    let mut game = Game::new(rows, cols, Box::new(io::stdout()), word_list, symbol_list);
     game.run()?;
     Ok(())
 }

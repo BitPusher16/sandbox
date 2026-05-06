@@ -1,0 +1,10 @@
+pub fn get_symbol_list() -> Vec<char> {
+    vec![
+        '%',
+        '$',
+        '*',
+        '*',
+        '*',
+    ]
+}
+

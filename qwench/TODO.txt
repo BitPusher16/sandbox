@@ -25,3 +25,5 @@
 - high score should scale with speed. and also reward diverse character sets?
 
 - find a way to restore terminal config if user quits with ctrl-c?
+
+- at game end (both win and loss), should show chars per minute, total errors.
