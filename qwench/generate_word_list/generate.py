@@ -91,7 +91,7 @@ def download_letter(letter: str) -> dict:
 
             if not WORD_RE.match(word):
                 continue
-            if not (4 <= len(word) <= 8):
+            if not (6 <= len(word) <= 10):
                 continue
             if not word.startswith(letter):
                 continue  # skip any mis-filed entries

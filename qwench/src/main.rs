@@ -32,8 +32,11 @@ use crate::word_list::get_word_list;
 const MIN_COLS: usize = 144;
 const MIN_ROWS: usize = 48;
 const MAX_WORD_LEN: usize = 10;
+const WORD_LEN_BUFFER: usize = 2;
+const WORD_LEN_W_BUFFER: usize = MAX_WORD_LEN + WORD_LEN_BUFFER;
 //const MS_PER_TICK: u64 = 250;
-const MS_PER_TICK: u64 = 500;
+//const MS_PER_TICK: u64 = 500;
+const MS_PER_TICK: u64 = 50;
 const GAME_LENGTH_SEC: u64 = 2 * 60;
 //const GAME_LENGTH_SEC: u64 = 4;
 
@@ -545,12 +548,8 @@ fn read_words_from_disk() -> Vec<String>{
 
 #[derive(Debug)]
 pub struct WordPool {
-    // All words grouped by their first character
-    groups: BTreeMap<char, Vec<String>>,
-
-    // Currently AVAILABLE (not in-use) starting characters
-    // This list is what lets us randomly pick a free letter quickly
-    available_starts: Vec<char>,
+    groups: BTreeMap<char, Vec<String>>,     // keys are always lowercase
+    available_starts: Vec<char>,             // contains BOTH lowercase and uppercase for each letter
 }
 
 impl WordPool {
@@ -559,12 +558,22 @@ impl WordPool {
 
         for word in words {
             if let Some(first_char) = word.chars().next() {
-                groups.entry(first_char).or_default().push(word);
+                let lower = first_char.to_ascii_lowercase();
+                groups.entry(lower).or_default().push(word);
             }
         }
 
-        // This will always produce the same order: ['a', 'b', 'c', ..., 'z']
-        let available_starts: Vec<char> = groups.keys().cloned().collect();
+        // Build available_starts with BOTH lowercase and uppercase versions
+        // (preserves deterministic order similar to original: a,A,b,B,…)
+        let mut available_starts: Vec<char> = Vec::new();
+        for &lower in groups.keys() {
+            if lower.is_ascii_lowercase() {
+                available_starts.push(lower);
+                available_starts.push(lower.to_ascii_uppercase());
+            } else {
+                available_starts.push(lower); // fallback for non-ascii
+            }
+        }
 
         Self {
             groups,
@@ -577,15 +586,25 @@ impl WordPool {
             return None;
         }
 
-        // Pick a random free starting character
+        // Pick a random available start (may be lowercase or uppercase)
         let idx = rng.random_range(0..self.available_starts.len());
         let chosen_char = self.available_starts.swap_remove(idx);
 
-        // Pick a random word from that character's group
-        if let Some(word_list) = self.groups.get(&chosen_char) {
+        let lookup_key = chosen_char.to_ascii_lowercase();
+
+        if let Some(word_list) = self.groups.get(&lookup_key) {
             if !word_list.is_empty() {
                 let word_idx = rng.random_range(0..word_list.len());
-                return Some(word_list[word_idx].clone());
+                let mut word = word_list[word_idx].clone();
+
+                // If the chosen start was uppercase, capitalize the first letter of the word
+                if chosen_char.is_ascii_uppercase() && !word.is_empty() {
+                    let mut chars: Vec<char> = word.chars().collect();
+                    chars[0] = chars[0].to_ascii_uppercase();
+                    word = chars.into_iter().collect();
+                }
+
+                return Some(word);
             }
         }
 
@@ -593,10 +612,9 @@ impl WordPool {
     }
 
     pub fn put(&mut self, c: char) {
-        // Only add it back if we actually know this character
-        // and it's not already in the available list
-        if self.groups.contains_key(&c) && !self.available_starts.contains(&c) {
-            self.available_starts.push(c);
+        let lower = c.to_ascii_lowercase();
+        if self.groups.contains_key(&lower) && !self.available_starts.contains(&c) {
+            self.available_starts.push(c); // push the exact case that was taken
         }
     }
 
@@ -608,6 +626,72 @@ impl WordPool {
         !self.available_starts.is_empty()
     }
 }
+
+//#[derive(Debug)]
+//pub struct WordPool {
+//    // All words grouped by their first character
+//    groups: BTreeMap<char, Vec<String>>,
+//
+//    // Currently AVAILABLE (not in-use) starting characters
+//    // This list is what lets us randomly pick a free letter quickly
+//    available_starts: Vec<char>,
+//}
+
+//impl WordPool {
+//    pub fn new(words: Vec<String>) -> Self {
+//        let mut groups: BTreeMap<char, Vec<String>> = BTreeMap::new();
+//
+//        for word in words {
+//            if let Some(first_char) = word.chars().next() {
+//                groups.entry(first_char).or_default().push(word);
+//            }
+//        }
+//
+//        // This will always produce the same order: ['a', 'b', 'c', ..., 'z']
+//        let available_starts: Vec<char> = groups.keys().cloned().collect();
+//
+//        Self {
+//            groups,
+//            available_starts,
+//        }
+//    }
+//
+//    pub fn get(&mut self, rng: &mut impl Rng) -> Option<String> {
+//        if self.available_starts.is_empty() {
+//            return None;
+//        }
+//
+//        // Pick a random free starting character
+//        let idx = rng.random_range(0..self.available_starts.len());
+//        let chosen_char = self.available_starts.swap_remove(idx);
+//
+//        // Pick a random word from that character's group
+//        if let Some(word_list) = self.groups.get(&chosen_char) {
+//            if !word_list.is_empty() {
+//                let word_idx = rng.random_range(0..word_list.len());
+//                return Some(word_list[word_idx].clone());
+//            }
+//        }
+//
+//        None
+//    }
+//
+//    pub fn put(&mut self, c: char) {
+//        // Only add it back if we actually know this character
+//        // and it's not already in the available list
+//        if self.groups.contains_key(&c) && !self.available_starts.contains(&c) {
+//            self.available_starts.push(c);
+//        }
+//    }
+//
+//    pub fn available_count(&self) -> usize {
+//        self.available_starts.len()
+//    }
+//
+//    pub fn has_available(&self) -> bool {
+//        !self.available_starts.is_empty()
+//    }
+//}
 
 #[derive(Debug)]
 pub struct SymbolPool {
@@ -771,7 +855,8 @@ impl Game{
 
     fn place_cloud(&mut self){
 
-        let mut word:String = "foo".to_string();
+        //let mut word:String = "foo".to_string();
+        let mut word:String = "".to_string();
         // BUG: do not use modulo here. place_cloud() is only called for certain moduli.
         //if self.ticks % 6 == 5 {
         if 1 == 0 {
@@ -790,9 +875,6 @@ impl Game{
             //let word = self.word_pool.get(&mut self.rng).unwrap_or("error".to_string());
             word = self.word_pool.get(&mut self.rng).unwrap_or("error".to_string());
         }
-
-        //let word = "bar".to_string();
-
 
         let (m, n) = (self.grid.len(), self.grid[0].len());
 
@@ -814,25 +896,7 @@ impl Game{
         loop{
             let (i, j) = (cloud_search_rev / n, cloud_search_rev % n);
 
-            // searched back far enough, found nothing.
-            if( 
-                cloud_search_cur - cloud_search_rev == MAX_WORD_LEN
-                && matches!(self.grid[i][j], GridCell::Em(_))
-            ){ 
-                //self.debug_vec.push(format!("enough {i},{j}").to_string());
-                break;
-            }
-
-            // searched back far enough, reached first possible cloud position.
-            if( 
-                cloud_search_cur - cloud_search_rev == MAX_WORD_LEN
-                && cloud_search_rev == cloud_min
-            ){ 
-                //self.debug_vec.push(format!("first {i},{j}").to_string());
-                break; 
-            }
-
-            // reached beginning of row, is empty.
+            // search reached beginning of row, it is empty.
             if( 
                 (cloud_search_rev % n) == 0
                 && matches!(self.grid[i][j], GridCell::Em(_))
@@ -841,25 +905,39 @@ impl Game{
                 break;
             }
 
+            // search reached first possible cloud position, is empty.
+            if( 
+                cloud_search_rev == cloud_min
+                && matches!(self.grid[i][j], GridCell::Em(_))
+            ){ 
+                //self.debug_vec.push(format!("first {i},{j}").to_string());
+                break; 
+            }
+
             // encountered raindrop.
-            // assume that raindrop does not exist in area covered by any cloud.
+            // assume that raindrop can not exist in area covered by any cloud.
+            // safe to stop backward search.
             if let GridCell::Rd(rd) = &self.grid[i][j]{
                 //self.debug_vec.push(format!("raindrop {i},{j}").to_string());
-                cloud_search_cur = max(cloud_search_cur, cloud_search_rev + 1);
+                break;
+            }
+
+            // searched back far enough to account for max possible word, is empty.
+            if( 
+                cloud_search_cur - cloud_search_rev == WORD_LEN_W_BUFFER + 1
+            ){ 
+                //self.debug_vec.push(format!("enough {i},{j}").to_string());
                 break;
             }
 
             // encountered cloud;
             if let GridCell::Cd(cd) = &self.grid[i][j]{
                 //self.debug_vec.push(format!("hit cloud at {i},{j}").to_string());
-                cloud_search_cur = max(cloud_search_cur, cloud_search_rev + cd.word.len());
+                cloud_search_cur = max(cloud_search_cur, cloud_search_rev + cd.word.len() + WORD_LEN_BUFFER);
                 break;
             }
 
-            if let GridCell::Em(em) = &self.grid[i][j]{
-                //self.debug_vec.push(format!("n{i},{j}").to_string());
-                cloud_search_rev -= 1;
-            }
+            cloud_search_rev -= 1;
         }
 
 
@@ -876,7 +954,7 @@ impl Game{
                 let mut k = j + 1;
                 'iter_k: loop {
 
-                    if (k - j) == word.len(){
+                    if (k - j) == word.len() + WORD_LEN_BUFFER {
                         // we have space for the word.
                         // place word now? or better after loop?
 
@@ -1194,6 +1272,10 @@ impl Game{
         //self.debug_vec.push("k".to_string());
 
         // setting active_cloud_coords to 0, 0 signifies no active cloud.
+
+        // BUG: on returning a first_char to pool,
+        // this function needs to first check if the char returns to 
+        // symbol_pool or word_pool.
 
         let mut inc_index = false;
 
