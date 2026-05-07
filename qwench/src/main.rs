@@ -31,12 +31,18 @@ use crate::word_list::get_word_list;
 
 const MIN_COLS: usize = 144;
 const MIN_ROWS: usize = 48;
+
 const MAX_WORD_LEN: usize = 10;
+const MIN_WORD_LEN: usize = 6;
 const WORD_LEN_BUFFER: usize = 2;
 const WORD_LEN_W_BUFFER: usize = MAX_WORD_LEN + WORD_LEN_BUFFER;
+
+const MAX_SYMBOLS_LEN: usize = 6;
+const MIN_SYMBOLS_LEN: usize = 4;
+
 //const MS_PER_TICK: u64 = 250;
 //const MS_PER_TICK: u64 = 500;
-const MS_PER_TICK: u64 = 50;
+const MS_PER_TICK: u64 = 250;
 const GAME_LENGTH_SEC: u64 = 2 * 60;
 //const GAME_LENGTH_SEC: u64 = 4;
 
@@ -144,9 +150,9 @@ fn draw_onto(
 
 // call like:
 //   let sprite = string_to_sprite(r#"
-//       xbr $br zgr,
-//       cbr xbr xbr,
-//       xbr $br zgr,
+//       xbr $br zgr•
+//       cbr xbr xbr•
+//       xbr $br zgr•
 //   "#);
 fn string_to_sprite(input: &str, shift_up: usize, shift_left: usize) -> Sprite {
     fn char_to_color(c: char) -> Color {
@@ -176,7 +182,7 @@ fn string_to_sprite(input: &str, shift_up: usize, shift_left: usize) -> Sprite {
     sprite.shift_up = shift_up;
     sprite.shift_left = shift_left;
     let cleaned: String = input.chars().filter(|c| !c.is_whitespace()).collect();
-    for row_str in cleaned.split(',') {
+    for row_str in cleaned.split('•') {
         if row_str.is_empty() { continue; }
         let chars: Vec<char> = row_str.chars().collect();
         let mut row = Vec::new();
@@ -259,13 +265,13 @@ impl Cloud {
         for (i, c) in self.word.chars().enumerate() {
             ret += &c.to_string();
             if i < self.idx {
-                ret += "rw "
+                ret += "ry "
             }
             else{
                 ret += "bw "
             }
         }
-        ret += ",";
+        ret += "•";
         for i in 0..self.word.len() {
             //if self.idx == 0{ ret += "~bw "; }
             //else{ ret += "~rw "; }
@@ -325,33 +331,33 @@ impl Grass {
         match self.fire_resist {
             0 => match self.anim_state {
                 0 => string_to_sprite(r#"
-                    #rk,
+                    #rk•
                     "rk
                 "#, 0, 0),
                 1 => string_to_sprite(r#"
-                    &yk,
+                    &yk•
                     "rk
                 "#, 0, 0),
                 2 => string_to_sprite(r#"
-                    %yk,
+                    %yk•
                     "rk
                 "#, 0, 0),
                 3 => string_to_sprite(r#"
-                    *yk,
+                    *yk•
                     "rk
                 "#, 0, 0),
                 _ => string_to_sprite(r#" "#, 0, 0),
             },
             1..=2 => string_to_sprite(r#"
-                vyk,
+                vyk•
                 "yk
             "#, 0, 0),
             WATERLOGGED.. => string_to_sprite(r#"
-                vgk,
+                vgk•
                 "gb
             "#, 0, 0),
             _ => string_to_sprite(r#"
-                vgk,
+                vgk•
                 "gk
             "#, 0, 0),
         }
@@ -370,12 +376,12 @@ impl GameOverMessage {
 
         let mut ret = String::new();
         for i in 0..self.word.len() { ret += "~bw " }
-        ret += ",";
+        ret += "•";
         for (i, c) in self.word.chars().enumerate() {
             ret += &c.to_string();
             ret += "rw "
         }
-        ret += ",";
+        ret += "•";
         for i in 0..self.word.len() { ret += "~bw " }
 
         string_to_sprite(&ret, 0, 0)
@@ -829,7 +835,7 @@ impl Game{
             bad_press: false,
             rng: SeedableRng::seed_from_u64(8),
             word_pool: WordPool::new(word_list),
-            symbol_pool: SymbolPool::new(symbol_list, 4, 6),
+            symbol_pool: SymbolPool::new(symbol_list, MIN_SYMBOLS_LEN, MAX_SYMBOLS_LEN),
             debug_vec: Vec::new()
         }
     }
@@ -853,15 +859,15 @@ impl Game{
         }
     }
 
-    fn place_cloud(&mut self){
+    fn place_cloud(&mut self, use_symbols:bool){
 
-        //let mut word:String = "foo".to_string();
-        let mut word:String = "".to_string();
         // BUG: do not use modulo here. place_cloud() is only called for certain moduli.
         //if self.ticks % 6 == 5 {
-        if 1 == 0 {
+
+        let mut word:String = "".to_string();
+        if use_symbols {
             // add some symbols
-            self.debug_vec.push(format!("adding symbols"));
+            //self.debug_vec.push(format!("adding symbols"));
             if !self.symbol_pool.has_available(){ return; }
             //let word = self.symbol_pool.get(&mut self.rng).unwrap_or("error".to_string());
             word = self.symbol_pool.get(&mut self.rng).unwrap_or("error".to_string());
@@ -1036,7 +1042,9 @@ impl Game{
         for row in &mut self.update_applied { row.fill(false); }
 
         if self.ticks % 4 == 0{ self.place_raindrop(); }
-        if self.ticks % 2 == 0{ self.place_cloud(); }
+
+        if self.ticks % 12 == 0{ self.place_cloud(true);}
+        else if self.ticks % 2 == 0{ self.place_cloud(false); }
 
         let (m, n) = (self.grid.len(), self.grid[0].len());
         for i in 0..m {
@@ -1334,7 +1342,7 @@ impl Game{
                     execute!(self.out, 
                         // MoveTo is (column, row).
                         cursor::MoveTo(char_j as u16, char_i as u16),
-                        PrintStyledContent(ch.with(Color::Red).on(Color::White))
+                        PrintStyledContent(ch.with(Color::Red).on(Color::Yellow))
                     )?;
 
                     cd.idx += 1;
@@ -1342,7 +1350,12 @@ impl Game{
                         cd.delete = true;
                         self.active_cloud_coords = (0, 0);
                         if let Some(ch) = cd.word.chars().next(){
-                            self.word_pool.put(ch);
+                            if self.symbol_pool.exists_in_available_starts(ch){
+                                self.symbol_pool.put(ch);
+                            }
+                            else{
+                                self.word_pool.put(ch);
+                            }
                         }
                     }
                 }
