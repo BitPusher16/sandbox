@@ -1,5 +1,5 @@
 [project]
-name = "cic-prover"
+name = "cic-repl"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -8,5 +8,5 @@ dependencies = []
 
 [dependency-groups]
 dev = [
-    "basedpyright>=1.39.4",
+    "basedpyright>=1.39.5",
 ]

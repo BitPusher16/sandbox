@@ -1,0 +1,52 @@
+-- ════════════════════════════════════════════════════════════════════
+-- Example 3: Custom Definitions and Deeper Proofs
+-- ════════════════════════════════════════════════════════════════════
+
+-- ── Doubling function ─────────────────────────────────────────────────
+def double : Nat → Nat := fun (n : Nat) => Nat.add n n
+
+#eval double 0
+#eval double 3
+#eval double 7
+
+-- ── double 0 = 0 ──────────────────────────────────────────────────────
+theorem double_zero : Eq Nat (double 0) 0 := Eq.refl Nat 0
+
+-- ── double 3 = 6 ──────────────────────────────────────────────────────
+theorem double_three : Eq Nat (double 3) 6 := Eq.refl Nat 6
+
+-- ── 0 + 0 = 0 ─────────────────────────────────────────────────────────
+theorem zero_plus_zero : Eq Nat (Nat.add 0 0) 0 := Eq.refl Nat 0
+
+-- ── n + 0 = n  (base case of Nat.rec fires immediately) ───────────────
+theorem add_right_zero : ∀ (n : Nat), Eq Nat (Nat.add n 0) n := fun (n : Nat) => Eq.refl Nat n
+
+-- ── Congruence for Nat.succ ────────────────────────────────────────────
+-- Eq.subst rewrites under a motive. Here the motive is:
+--   fun x => Eq Nat (Nat.succ a) (Nat.succ x)
+-- giving us: if Eq Nat a a (refl), then Eq Nat (succ a) (succ b) after subst.
+theorem succ_congr : ∀ (a : Nat) (b : Nat), Eq Nat a b → Eq Nat (Nat.succ a) (Nat.succ b) := fun (a : Nat) (b : Nat) (h : Eq Nat a b) => Eq.subst Nat (fun (x : Nat) => Eq Nat (Nat.succ a) (Nat.succ x)) a b h (Eq.refl Nat (Nat.succ a))
+
+-- ── Use succ_congr ────────────────────────────────────────────────────
+theorem succ_two_eq_succ_two : Eq Nat (Nat.succ 2) (Nat.succ 2) := succ_congr 2 2 (Eq.refl Nat 2)
+
+-- ── Specific arithmetic facts ─────────────────────────────────────────
+theorem add_assoc_2_3_4 : Eq Nat (Nat.add (Nat.add 2 3) 4) (Nat.add 2 (Nat.add 3 4)) := Eq.refl Nat 9
+
+theorem mul_dist_2_3_4 : Eq Nat (Nat.mul 2 (Nat.add 3 4)) (Nat.add (Nat.mul 2 3) (Nat.mul 2 4)) := Eq.refl Nat 14
+
+-- ── double 5 = 10, double 4 = 8 (concrete checks) ─────────────────────
+theorem double_five : Eq Nat (double 5) 10 := Eq.refl Nat 10
+theorem double_four : Eq Nat (double 4) 8 := Eq.refl Nat 8
+
+-- ── Combining add_right_zero and succ_congr ────────────────────────────
+-- Prove: Nat.add (Nat.succ n) 0 = Nat.succ n
+theorem add_succ_zero : ∀ (n : Nat), Eq Nat (Nat.add (Nat.succ n) 0) (Nat.succ n) := fun (n : Nat) => Eq.refl Nat (Nat.succ n)
+
+-- ── Check universe membership ─────────────────────────────────────────
+-- Nat : Type (Sort 1)
+#check Nat
+-- double : Nat → Nat  (a function between types)
+#check double
+-- Eq Nat 0 0 : Prop (Sort 0)
+#check Eq Nat 0 0

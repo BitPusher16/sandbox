@@ -1,0 +1,141 @@
+-- ════════════════════════════════════════════════════════════════════
+-- Example 4: Quotient Types
+-- ════════════════════════════════════════════════════════════════════
+--
+-- A quotient type Quot alpha r collapses a type alpha by a relation r:
+-- elements a and b that are related by r become definitionally equal
+-- (actually: propositionally equal, via Quot.sound) in Quot alpha r.
+--
+-- The four primitives:
+--
+--   Quot      : (alpha : Type) -> (alpha -> alpha -> Prop) -> Type
+--   Quot.mk   : (alpha : Type) -> (r : alpha -> alpha -> Prop) -> alpha -> Quot alpha r
+--   Quot.lift : ... -> (f : alpha -> beta) -> (soundness proof) -> Quot alpha r -> beta
+--   Quot.ind  : ... -> (forall a, P (Quot.mk r a)) -> forall q, P q
+--
+-- Plus the axiom:
+--   Quot.sound : r a b -> Eq (Quot r) (Quot.mk r a) (Quot.mk r b)
+--
+-- The reduction rule (quot-beta):
+--   Quot.lift alpha beta r f h (Quot.mk alpha r a)  -->  f a
+-- This fires in the kernel whenever the major premise is a Quot.mk.
+--
+-- ── Check the types of the primitives ─────────────────────────────────
+#check Quot
+#check Quot.mk
+#check Quot.lift
+#check Quot.ind
+#check Quot.sound
+
+-- ════════════════════════════════════════════════════════════════════
+-- PART 1: The trivial (total) quotient
+-- Collapse everything to one equivalence class by using the always-true relation.
+-- ════════════════════════════════════════════════════════════════════
+
+-- The trivial relation: every two naturals are related.
+def triv : Nat → Nat → Prop := fun (a : Nat) (b : Nat) => True
+
+-- [n]_triv  is the unique equivalence class.
+-- #check confirms Quot.mk wraps a Nat into the quotient type.
+#check Quot.mk Nat triv 0
+#check Quot.mk Nat triv 7
+
+-- Lift the constant function (fun _ => 42) over the trivial quotient.
+-- Soundness proof: the constant function trivially respects any relation.
+def const_lift : Quot Nat triv → Nat := fun (q : Quot Nat triv) => Quot.lift Nat Nat triv (fun (n : Nat) => 42) (fun (a : Nat) (b : Nat) (_ : triv a b) => Eq.refl Nat 42) q
+
+-- quot-beta fires: Quot.lift ... (Quot.mk ... n) --> 42
+-- The kernel computes this by the reduction rule, not by a theorem.
+#eval Quot.lift Nat Nat triv (fun (n : Nat) => 42) (fun (a : Nat) (b : Nat) (_ : triv a b) => Eq.refl Nat 42) (Quot.mk Nat triv 3)
+#eval Quot.lift Nat Nat triv (fun (n : Nat) => 42) (fun (a : Nat) (b : Nat) (_ : triv a b) => Eq.refl Nat 42) (Quot.mk Nat triv 99)
+
+-- Theorem: const_lift of any Quot.mk is 42.
+-- Proof: quot-beta reduces the left side to 42 immediately.
+theorem const_lift_always_42 : ∀ (n : Nat), Eq Nat (const_lift (Quot.mk Nat triv n)) 42 := fun (n : Nat) => Eq.refl Nat 42
+
+-- Theorem: const_lift applied to two different Quot.mk values gives the same result.
+-- This holds definitionally because both sides compute to 42.
+theorem const_lift_uniform : ∀ (n : Nat) (m : Nat), Eq Nat (const_lift (Quot.mk Nat triv n)) (const_lift (Quot.mk Nat triv m)) := fun (n : Nat) (m : Nat) => Eq.refl Nat 42
+
+-- ════════════════════════════════════════════════════════════════════
+-- PART 2: Quot.sound in action
+-- Even without computing, Quot.sound lets us prove that related
+-- elements are equal in the quotient.
+-- ════════════════════════════════════════════════════════════════════
+
+-- Declare a parity relation as an axiom (we don't define even/odd here,
+-- just posit that the relation exists with the right properties).
+axiom same_parity : Nat → Nat → Prop
+axiom sp_refl : ∀ (n : Nat), same_parity n n
+axiom sp_symm : ∀ (n : Nat) (m : Nat), same_parity n m → same_parity m n
+axiom sp_0_2 : same_parity 0 2
+axiom sp_1_3 : same_parity 1 3
+
+-- Quot.sound converts a proof that r a b holds into a proof that
+-- [a] = [b] in the quotient.  No computation needed -- it's an axiom.
+#check Quot.sound Nat same_parity 0 2 sp_0_2
+
+-- Theorem: [0] = [2] in Quot Nat same_parity
+theorem mk0_eq_mk2 : Eq (Quot Nat same_parity) (Quot.mk Nat same_parity 0) (Quot.mk Nat same_parity 2) := Quot.sound Nat same_parity 0 2 sp_0_2
+
+-- Theorem: [1] = [3] in Quot Nat same_parity
+theorem mk1_eq_mk3 : Eq (Quot Nat same_parity) (Quot.mk Nat same_parity 1) (Quot.mk Nat same_parity 3) := Quot.sound Nat same_parity 1 3 sp_1_3
+
+-- ════════════════════════════════════════════════════════════════════
+-- PART 3: Lifting a function over the parity quotient
+-- A function f : Nat -> beta can be lifted to Quot Nat same_parity -> beta
+-- if and only if it sends same-parity naturals to the same result.
+-- ════════════════════════════════════════════════════════════════════
+
+-- Axiomatize a parity function and its soundness proof.
+axiom parity_fn : Nat → Nat
+axiom parity_fn_sound : ∀ (a : Nat) (b : Nat), same_parity a b → Eq Nat (parity_fn a) (parity_fn b)
+
+-- Lift parity_fn to the quotient.
+def parity_of : Quot Nat same_parity → Nat := fun (q : Quot Nat same_parity) => Quot.lift Nat Nat same_parity parity_fn parity_fn_sound q
+
+-- quot-beta: parity_of (Quot.mk n) computes to parity_fn n immediately.
+-- The kernel reduces this by the quot-reduction rule.
+#eval Quot.lift Nat Nat same_parity parity_fn parity_fn_sound (Quot.mk Nat same_parity 0)
+#eval Quot.lift Nat Nat same_parity parity_fn parity_fn_sound (Quot.mk Nat same_parity 1)
+
+-- Theorem: parity_of respects the relation -- same-parity inputs give same output.
+-- Proof: Eq.subst rewrites along mk0_eq_mk2 (which came from Quot.sound).
+theorem parity_of_0_eq_parity_of_2 : Eq Nat (parity_of (Quot.mk Nat same_parity 0)) (parity_of (Quot.mk Nat same_parity 2)) := Eq.subst (Quot Nat same_parity) (fun (q : Quot Nat same_parity) => Eq Nat (parity_of (Quot.mk Nat same_parity 0)) (parity_of q)) (Quot.mk Nat same_parity 0) (Quot.mk Nat same_parity 2) mk0_eq_mk2 (Eq.refl Nat (parity_of (Quot.mk Nat same_parity 0)))
+
+-- Theorem: [1] and [3] also give equal parity outputs.
+theorem parity_of_1_eq_parity_of_3 : Eq Nat (parity_of (Quot.mk Nat same_parity 1)) (parity_of (Quot.mk Nat same_parity 3)) := Eq.subst (Quot Nat same_parity) (fun (q : Quot Nat same_parity) => Eq Nat (parity_of (Quot.mk Nat same_parity 1)) (parity_of q)) (Quot.mk Nat same_parity 1) (Quot.mk Nat same_parity 3) mk1_eq_mk3 (Eq.refl Nat (parity_of (Quot.mk Nat same_parity 1)))
+
+-- ════════════════════════════════════════════════════════════════════
+-- PART 4: Quot.ind -- proving propositions about all quotient elements
+-- ════════════════════════════════════════════════════════════════════
+
+-- Quot.ind says: to prove P q for every q : Quot alpha r,
+-- it suffices to prove P (Quot.mk r a) for every a : alpha.
+-- This is the induction principle for quotients.
+
+-- Axiomatize a property we want to prove about the quotient.
+axiom is_valid : Quot Nat same_parity → Prop
+axiom is_valid_mk : ∀ (n : Nat), is_valid (Quot.mk Nat same_parity n)
+
+-- Use Quot.ind to prove is_valid holds for ALL elements of the quotient,
+-- not just those spelled as Quot.mk.  (In practice, by Quot.ind every
+-- element IS a Quot.mk, but the type system doesn't expose this directly.)
+theorem is_valid_all : ∀ (q : Quot Nat same_parity), is_valid q := fun (q : Quot Nat same_parity) => Quot.ind Nat same_parity is_valid is_valid_mk q
+
+-- ════════════════════════════════════════════════════════════════════
+-- PART 5: The constant quotient as a proposition
+-- A quotient by the total relation (everything related) collapses to
+-- a type with exactly one element.  This mirrors how Lean builds
+-- Prop-valued quotients (e.g. propositional truncation).
+-- ════════════════════════════════════════════════════════════════════
+
+-- The total relation on Nat.
+def total_rel : Nat → Nat → Prop := fun (a : Nat) (b : Nat) => True
+
+-- Any two elements of the total quotient are equal.
+-- Proof: Quot.sound converts (True.intro : True) into an equality.
+theorem total_quot_unique : ∀ (a : Nat) (b : Nat), Eq (Quot Nat total_rel) (Quot.mk Nat total_rel a) (Quot.mk Nat total_rel b) := fun (a : Nat) (b : Nat) => Quot.sound Nat total_rel a b True.intro
+
+-- Corollary: the total quotient is a subsingleton (all elements are equal).
+theorem total_quot_subsingleton : ∀ (a : Nat) (b : Nat), Eq (Quot Nat total_rel) (Quot.mk Nat total_rel a) (Quot.mk Nat total_rel b) := total_quot_unique

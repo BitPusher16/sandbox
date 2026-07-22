@@ -1,0 +1,69 @@
+-- ════════════════════════════════════════════════════════════════════
+-- Example 2: Natural Numbers and Equality
+-- ════════════════════════════════════════════════════════════════════
+-- Nat is an inductive type in Sort 1 (= Type):
+--   inductive Nat : Type where
+--     | zero : Nat
+--     | succ : Nat → Nat
+--
+-- Nat.rec is its *recursor* (the only way to eliminate a Nat):
+--   Nat.rec : (motive : Nat → Type) ->
+--             motive Nat.zero ->
+--             ((n : Nat) -> motive n -> motive (Nat.succ n)) ->
+--             (t : Nat) -> motive t
+--
+-- Eq is the propositional equality type (lives in Prop = Sort 0):
+--   inductive Eq : {α : Type} -> α -> α -> Prop where
+--     | refl : ∀ (a : α), Eq a a
+
+-- ── Type of Nat ────────────────────────────────────────────────────────
+#check Nat
+
+-- ── Nat literals and arithmetic reduce by iota-reduction of Nat.rec ───────
+#eval 3
+#eval Nat.add 2 3
+#eval Nat.mul 3 4
+#eval Nat.add 10 7
+#eval Nat.mul 5 6
+
+-- ── Eq.refl proves trivial equalities ─────────────────────────────────
+-- Eq.refl Nat 0  :  Eq Nat 0 0
+#check Eq.refl Nat 0
+
+-- ── 2 + 3 = 5 (by computation / definitional equality) ───────────────
+-- The kernel reduces Nat.add 2 3 to 5 by iota-reduction, so Eq.refl witnesses it.
+theorem two_plus_three : Eq Nat (Nat.add 2 3) 5 := Eq.refl Nat 5
+
+-- ── n + 0 = n (right identity, immediate from the base case of Nat.rec) ──
+-- Nat.add n 0 is defined as Nat.rec motive n step 0.
+-- Since 0 = Nat.zero, iota fires with the base case, returning n.
+-- So Nat.add n 0 is definitionally equal to n, and Eq.refl suffices.
+theorem add_right_zero : ∀ (n : Nat), Eq Nat (Nat.add n 0) n := fun (n : Nat) => Eq.refl Nat n
+
+-- ── 3 * 4 = 12 ────────────────────────────────────────────────────────
+theorem three_times_four : Eq Nat (Nat.mul 3 4) 12 := Eq.refl Nat 12
+
+-- ── Nat.succ Nat.zero = 1 ─────────────────────────────────────────────
+theorem succ_zero_eq_one : Eq Nat (Nat.succ Nat.zero) 1 := Eq.refl Nat 1
+
+-- ── 2 + 3 = 3 + 2 (both reduce definitionally to 5) ──────────────────
+theorem add_comm_2_3 : Eq Nat (Nat.add 2 3) (Nat.add 3 2) := Eq.refl Nat 5
+
+-- ── Equality is reflexive ─────────────────────────────────────────────
+theorem eq_refl_nat : ∀ (n : Nat), Eq Nat n n := fun (n : Nat) => Eq.refl Nat n
+
+-- ── Equality is symmetric ─────────────────────────────────────────────
+theorem eq_symm_demo : ∀ (n : Nat) (m : Nat), Eq Nat n m → Eq Nat m n := fun (n : Nat) (m : Nat) (h : Eq Nat n m) => Eq.symm Nat n m h
+
+-- ── Equality is transitive ────────────────────────────────────────────
+theorem eq_trans_demo : ∀ (a : Nat) (b : Nat) (c : Nat), Eq Nat a b → Eq Nat b c → Eq Nat a c := fun (a : Nat) (b : Nat) (c : Nat) (h1 : Eq Nat a b) (h2 : Eq Nat b c) => Eq.trans Nat a b c h1 h2
+
+-- ── Congruence: if a = b then succ a = succ b ─────────────────────────
+-- Eq.subst Nat motive a b h ma  rewrites ma : motive a into motive b.
+-- Here motive = fun x => Eq Nat (Nat.succ a) (Nat.succ x).
+theorem succ_congr : ∀ (a : Nat) (b : Nat), Eq Nat a b → Eq Nat (Nat.succ a) (Nat.succ b) := fun (a : Nat) (b : Nat) (h : Eq Nat a b) => Eq.subst Nat (fun (x : Nat) => Eq Nat (Nat.succ a) (Nat.succ x)) a b h (Eq.refl Nat (Nat.succ a))
+
+-- ── Check universe membership ─────────────────────────────────────────
+#check Nat
+#check Eq Nat 0 0
+#check Prop

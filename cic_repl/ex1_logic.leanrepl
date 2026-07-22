@@ -1,0 +1,67 @@
+-- ════════════════════════════════════════════════════════════════════
+-- Example 1: Propositions and Logic
+-- ════════════════════════════════════════════════════════════════════
+-- In Lean (and our kernel), Prop = Sort 0.
+-- A proposition is just a term whose type is Prop.
+-- A *proof* of proposition P is a term of type P.
+-- This is the Curry-Howard correspondence:
+--   Propositions as Types,  Proofs as Programs.
+
+-- Read ":=" as "by". (or "defined as"?)
+
+-- ── Universe checks ──────────────────────────────────────────────────
+-- Prop : Type (Sort 0 : Sort 1)
+#check Prop
+-- Type : Type 1 (Sort 1 : Sort 2)
+#check Type
+
+-- ── Identity proof ────────────────────────────────────────────────────
+-- The proof term is the identity function. In Lean: fun P hp => hp
+theorem id_prop : ∀ (P : Prop), P → P := fun (P : Prop) (hp : P) => hp
+
+-- ── Modus ponens ──────────────────────────────────────────────────────
+theorem modus_ponens : ∀ (P : Prop) (Q : Prop), (P → Q) → P → Q := fun (P : Prop) (Q : Prop) (hpq : P → Q) (hp : P) => hpq hp
+
+-- ── Hypothetical syllogism (function composition) ─────────────────────
+theorem hyp_syll : ∀ (P : Prop) (Q : Prop) (R : Prop), (P → Q) → (Q → R) → P → R := fun (P : Prop) (Q : Prop) (R : Prop) (hpq : P → Q) (hqr : Q → R) (hp : P) => hqr (hpq hp)
+
+-- rewriting previous theorem with parens to make right associativity clear.
+-- "P implies Q implies a function which, given Q implies R, implies that P implies R."
+theorem hyp_syll_parens : ∀ (P : Prop) (Q : Prop) (R : Prop), (P → Q) → ((Q → R) → (P → R)) := fun (P : Prop) (Q : Prop) (R : Prop) (hpq : P → Q) (hqr : Q → R) (hp : P) => hqr (hpq hp)
+
+-- ── Conjunction introduction ───────────────────────────────────────────
+-- And.intro takes the two propositions and then the two proofs
+theorem and_intro_demo : ∀ (P : Prop) (Q : Prop), P → Q → And P Q := fun (P : Prop) (Q : Prop) (hp : P) (hq : Q) => And.intro P Q hp hq
+
+-- ── Conjunction elimination ────────────────────────────────────────────
+theorem and_left_demo : ∀ (P : Prop) (Q : Prop), And P Q → P := fun (P : Prop) (Q : Prop) (h : And P Q) => And.left P Q h
+
+theorem and_left_demo_parens : ∀ (P : Prop) (Q : Prop), (And P Q) → P := fun (P : Prop) (Q : Prop) (h : And P Q) => And.left P Q h
+
+
+theorem and_right_demo : ∀ (P : Prop) (Q : Prop), And P Q → Q := fun (P : Prop) (Q : Prop) (h : And P Q) => And.right P Q h
+
+-- ── Commutativity of And ───────────────────────────────────────────────
+theorem and_comm : ∀ (P : Prop) (Q : Prop), And P Q → And Q P := fun (P : Prop) (Q : Prop) (h : And P Q) => And.intro Q P (And.right P Q h) (And.left P Q h)
+
+-- ── Disjunction introduction ───────────────────────────────────────────
+theorem or_inl_demo : ∀ (P : Prop) (Q : Prop), P → Or P Q := fun (P : Prop) (Q : Prop) (hp : P) => Or.inl P Q hp
+
+theorem or_inr_demo : ∀ (P : Prop) (Q : Prop), Q → Or P Q := fun (P : Prop) (Q : Prop) (hq : Q) => Or.inr P Q hq
+
+-- ── True is trivially provable ─────────────────────────────────────────
+-- True.intro : True  is the canonical proof of True
+theorem trivially_true : True := True.intro
+
+-- ── Implication is transitive (same as hyp_syll, different style) ─────
+theorem impl_trans : ∀ (P : Prop) (Q : Prop) (R : Prop), (P → Q) → (Q → R) → (P → R) := fun (P : Prop) (Q : Prop) (R : Prop) (f : P → Q) (g : Q → R) (h : P) => g (f h)
+
+-- ── A proposition can imply itself in two ways ─────────────────────────
+-- The projection from And P P to P
+theorem and_self_left : ∀ (P : Prop), And P P → P := fun (P : Prop) (h : And P P) => And.left P P h
+
+-- ── Check the types of the main connectives ───────────────────────────
+#check And.intro
+#check Or.inl
+#check True.intro
+#check False.elim

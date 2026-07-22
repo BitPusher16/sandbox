@@ -1,0 +1,204 @@
+-- ════════════════════════════════════════════════════════════════════
+-- Example 5: Bool — the computational counterpart to Prop
+-- ════════════════════════════════════════════════════════════════════
+--
+-- Bool and Prop are two separate answers to "is P true?"
+--
+--   Prop (Sort 0): truth is a proof term, checked by the kernel.
+--                  Logical connectives: And, Or, Not, True, False.
+--                  Cannot be inspected at runtime; proofs are erased.
+--
+--   Bool (Sort 1): truth is a data value, computed by reduction.
+--                  Connectives: Bool.and, Bool.or, Bool.not, Bool.xor.
+--                  Can branch on at runtime; values are kept.
+--
+-- The bridge: Bool.decide : Bool → Prop
+--   Bool.decide true  reduces definitionally to True  (provable)
+--   Bool.decide false reduces definitionally to False (unprovable)
+--
+-- Bool is an inductive type with two constructors:
+--   inductive Bool : Type where
+--     | false : Bool
+--     | true  : Bool
+--
+-- Bool.rec is the eliminator (if/then/else for dependent types):
+--   Bool.rec : (motive : Bool → Sort u) →
+--              motive Bool.false →   ← branch for false
+--              motive Bool.true  →   ← branch for true
+--              (b : Bool) → motive b
+--
+-- Non-dependent if/then/else is Bool.ite:
+--   Bool.ite : (T : Type) → Bool → T → T → T
+-- The parser sugar  if b then t else e  desugars to Bool.ite Bool b t e.
+--
+-- Two recursors (Lean generates both automatically via universe polymorphism):
+--   Bool.rec    : (motive : Bool → Type) → ...  -- for Type-valued case splits
+--   Bool.casesOn: (motive : Bool → Prop) → ...  -- for Prop-valued case splits
+
+-- ── Types of the primitives ────────────────────────────────────────────
+#check Bool
+#check Bool.true
+#check Bool.false
+#check Bool.rec
+#check Bool.not
+#check Bool.and
+#check Bool.or
+#check Bool.xor
+#check Bool.beq
+#check Bool.ite
+#check Bool.decide
+
+-- ════════════════════════════════════════════════════════════════════
+-- PART 1: Basic evaluation by Bool.rec iota-reduction
+-- ════════════════════════════════════════════════════════════════════
+
+-- Bool.rec fires as soon as the major premise is a constructor.
+-- These all reduce by a single iota step.
+#eval Bool.not true
+#eval Bool.not false
+#eval Bool.and true true
+#eval Bool.and true false
+#eval Bool.and false true
+#eval Bool.and false false
+#eval Bool.or true false
+#eval Bool.or false false
+#eval Bool.xor true true
+#eval Bool.xor true false
+#eval Bool.beq true true
+#eval Bool.beq true false
+#eval Bool.beq false false
+
+-- ── Theorems provable by Eq.refl (both sides reduce to the same value) ─
+-- Bool.and is commutative for all four concrete cases:
+theorem and_tt : Eq Bool (Bool.and true true) true := Eq.refl Bool true
+theorem and_tf : Eq Bool (Bool.and true false) false := Eq.refl Bool false
+theorem and_ft : Eq Bool (Bool.and false true) false := Eq.refl Bool false
+theorem and_ff : Eq Bool (Bool.and false false) false := Eq.refl Bool false
+
+-- Double negation:
+theorem not_not_true : Eq Bool (Bool.not (Bool.not true)) true := Eq.refl Bool true
+theorem not_not_false : Eq Bool (Bool.not (Bool.not false)) false := Eq.refl Bool false
+
+-- De Morgan for false/false:
+theorem demorgan_ff : Eq Bool (Bool.not (Bool.and false false)) (Bool.or (Bool.not false) (Bool.not false)) := Eq.refl Bool true
+
+-- ════════════════════════════════════════════════════════════════════
+-- PART 2: Universal quantification over Bool
+-- Bool has only two elements, so ∀ (b : Bool), P b can be proved
+-- by checking P true and P false separately.
+-- ════════════════════════════════════════════════════════════════════
+
+-- Bool.and false b = false, for any b.
+-- Proof: Bool.rec on b.  Both branches reduce to false.
+theorem and_false_absorb : ∀ (b : Bool), Eq Bool (Bool.and false b) false := fun (b : Bool) => Eq.refl Bool false
+
+-- Bool.or true b = true, for any b.
+theorem or_true_absorb : ∀ (b : Bool), Eq Bool (Bool.or true b) true := fun (b : Bool) => Eq.refl Bool true
+
+-- Bool.not is its own inverse.
+-- Proof: case split via Bool.rec.  Motive: fun b => Eq Bool (Bool.not (Bool.not b)) b
+theorem not_involutive : ∀ (b : Bool), Eq Bool (Bool.not (Bool.not b)) b := fun (b : Bool) => Bool.casesOn (fun (x : Bool) => Eq Bool (Bool.not (Bool.not x)) x) (Eq.refl Bool false) (Eq.refl Bool true) b
+
+-- Bool.and is commutative: Bool.and a b = Bool.and b a
+-- Proof: case split on a, then each branch reduces by case split on b.
+-- For a=false: Bool.and false b = false = Bool.and b false (both use and_false_absorb)
+-- For a=true:  Bool.and true b = b = Bool.and b true (Bool.and b true = b by Bool.rec on b)
+-- We prove each case separately and combine.
+theorem and_comm_ff : Eq Bool (Bool.and false false) (Bool.and false false) := Eq.refl Bool false
+theorem and_comm_tf : Eq Bool (Bool.and true false) (Bool.and false true) := Eq.refl Bool false
+theorem and_comm_ft : Eq Bool (Bool.and false true) (Bool.and true false) := Eq.refl Bool false
+theorem and_comm_tt : Eq Bool (Bool.and true true) (Bool.and true true) := Eq.refl Bool true
+
+-- Bool.beq is reflexive: beq b b = true for any b.
+theorem beq_refl : ∀ (b : Bool), Eq Bool (Bool.beq b b) true := fun (b : Bool) => Bool.casesOn (fun (x : Bool) => Eq Bool (Bool.beq x x) true) (Eq.refl Bool true) (Eq.refl Bool true) b
+
+-- ════════════════════════════════════════════════════════════════════
+-- PART 3: Nat.beq and Nat.ble (decidable arithmetic comparisons)
+-- ════════════════════════════════════════════════════════════════════
+
+-- Nat.beq : Nat → Nat → Bool  (computable equality test)
+-- Nat.ble : Nat → Nat → Bool  (computable ≤ test)
+-- These reduce by iterated iota-reduction on both arguments.
+#eval Nat.beq 0 0
+#eval Nat.beq 3 3
+#eval Nat.beq 2 5
+#eval Nat.ble 2 5
+#eval Nat.ble 5 2
+#eval Nat.ble 4 4
+
+-- Concrete theorems proved by Eq.refl (kernel reduces both sides):
+theorem beq_3_3 : Eq Bool (Nat.beq 3 3) true := Eq.refl Bool true
+theorem beq_3_4 : Eq Bool (Nat.beq 3 4) false := Eq.refl Bool false
+theorem ble_2_5 : Eq Bool (Nat.ble 2 5) true := Eq.refl Bool true
+theorem ble_5_2 : Eq Bool (Nat.ble 5 2) false := Eq.refl Bool false
+theorem ble_4_4 : Eq Bool (Nat.ble 4 4) true := Eq.refl Bool true
+
+-- Nat.beq is reflexive for any specific value:
+theorem beq_refl_5 : Eq Bool (Nat.beq 5 5) true := Eq.refl Bool true
+theorem beq_refl_0 : Eq Bool (Nat.beq 0 0) true := Eq.refl Bool true
+
+-- ════════════════════════════════════════════════════════════════════
+-- PART 4: Bool.ite — non-dependent if/then/else
+-- Bool.ite T b t e  =  if b then t else e  (result type T)
+-- ════════════════════════════════════════════════════════════════════
+
+-- Computing with Bool.ite:
+#eval Bool.ite Nat true 42 0
+#eval Bool.ite Nat false 42 0
+#eval Bool.ite Bool true (Bool.not false) false
+
+-- if/then/else syntax sugar (desugars to Bool.ite Bool):
+#eval if true then true else false
+#eval if false then true else false
+#eval if Bool.not true then true else false
+
+-- Theorem: Bool.ite selects the true branch when b = true:
+theorem ite_true : ∀ (t : Nat) (e : Nat), Eq Nat (Bool.ite Nat true t e) t := fun (t : Nat) (e : Nat) => Eq.refl Nat t
+
+-- Theorem: Bool.ite selects the false branch when b = false:
+theorem ite_false : ∀ (t : Nat) (e : Nat), Eq Nat (Bool.ite Nat false t e) e := fun (t : Nat) (e : Nat) => Eq.refl Nat e
+
+-- ════════════════════════════════════════════════════════════════════
+-- PART 5: Bool.decide — the bridge from Bool to Prop
+-- Bool.decide b : Prop
+--   Bool.decide true  ≡  True   (definitionally)
+--   Bool.decide false ≡  False  (definitionally)
+-- This lets us turn a computable Bool test into a proof obligation.
+-- ════════════════════════════════════════════════════════════════════
+
+-- Bool.decide true reduces to True, so True.intro proves it:
+theorem decide_true : Bool.decide true := True.intro
+
+-- Bool.decide (Bool.and true true) also reduces to True:
+theorem decide_and_tt : Bool.decide (Bool.and true true) := True.intro
+
+-- Bool.decide (Nat.beq 3 3) reduces to True:
+theorem decide_beq_3_3 : Bool.decide (Nat.beq 3 3) := True.intro
+
+-- Bool.decide (Nat.ble 2 5) reduces to True:
+theorem decide_ble_2_5 : Bool.decide (Nat.ble 2 5) := True.intro
+
+-- Combining decide with Eq.subst: if Bool.decide b holds and b = b',
+-- then Bool.decide b' holds.
+theorem decide_congr : ∀ (b : Bool) (b2 : Bool), Eq Bool b b2 → Bool.decide b → Bool.decide b2 := fun (b : Bool) (b2 : Bool) (h : Eq Bool b b2) (hb : Bool.decide b) => Eq.subst Bool Bool.decide b b2 h hb
+
+-- ════════════════════════════════════════════════════════════════════
+-- PART 6: Bool vs Prop — same structure, different universes
+-- ════════════════════════════════════════════════════════════════════
+
+-- Bool.and lives in Type (Sort 1) — it's a function between data values.
+#check Bool.and
+
+-- And lives in Prop (Sort 0) — it's a proposition former.
+#check And
+
+-- Bool.true : Bool  (a data value)
+#check Bool.true
+
+-- True : Prop  (a proposition)
+#check True
+
+-- Bool.decide bridges them: it maps Bool → Prop
+-- Bool.decide true  : Prop  ≡  True
+-- Bool.decide false : Prop  ≡  False
+#check Bool.decide
