@@ -5,6 +5,16 @@
 // Cleaned Up Version
 // =====================================================
 
+// https://doc.rust-lang.org/std/keyword.mut.html
+// "The second is mutable references. 
+// They can be created from mut variables and must be unique: 
+// no other variables can have a mutable reference, nor a shared reference."
+
+// https://web.mit.edu/rust-lang_v1.25/arch/amd64_ubuntu1404/share/doc/rust/html/book/first-edition/mutability.html
+// "y is an immutable binding to a mutable reference, 
+// which means that you can’t bind 'y' to something else (y = &mut z), 
+// but y can be used to bind x to something else (*y = 5). A subtle distinction."
+
 use std::collections::HashMap;
 
 fn main() {
