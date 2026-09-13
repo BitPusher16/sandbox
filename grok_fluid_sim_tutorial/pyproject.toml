@@ -1,0 +1,20 @@
+[project]
+name = "grok-fluid-sim-tutorial"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "fj", email = "fj@somedomain.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.5.3",
+    "pypng>=0.20220715.0",
+]
+
+[project.scripts]
+grok-fluid-sim-tutorial = "grok_fluid_sim_tutorial:main"
+
+[build-system]
+requires = ["uv_build>=0.12.13,<0.13.0"]
+build-backend = "uv_build"
