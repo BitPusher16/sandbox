@@ -17,3 +17,7 @@ source .venv/bin/activate
 uv init my-project --python 3.12 # or uv init . --python 3.12
 cd my-project
 uv venv
+
+# run with (note uv init replaces underscores with hyphens):
+uv run grok-fluid-sim-tutorial
+
