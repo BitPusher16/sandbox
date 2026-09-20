@@ -14,6 +14,7 @@
 import numpy as np
 import png
 import math
+import time
 
 class Point:
     """A class representing a 2D point on a Cartesian plane."""
@@ -88,6 +89,9 @@ def pr(A):
     for row in np.atleast_2d(np.asarray(A, dtype=float)):
         print("".join(f"{_bg(x)}{x:6.2f}{RESET}" for x in row))
 
+def arry_normalize(A):
+    return (A - np.min(A)) / (np.max(A) - np.min(A))
+
 def one_dim_advec():
     x = 1
     y = 2
@@ -113,7 +117,7 @@ def one_dim_advec():
                 part_q_part_x = (q_curr - q_prev) / delta_x
 
                 #if t == 0 and i == 0 and j == 0:
-                    #foo = 10 #dbg
+                    #foo = 10
                 cpy[i,j] = A[i,j] - U * part_q_part_x
             A = cpy
             pr(A)
@@ -135,13 +139,13 @@ def one_dim_diffusion():
         for step in range(20):
             cpy = A.copy()
             for (i, j), val in np.ndenumerate(A):
-                q_curr = A[i,j] #dbg
+                q_curr = A[i,j]
                 q_prev = A[i,(j-1) % A.shape[1]]
                 q_next = A[i,(j+1) % A.shape[1]]
                 part2_q_part_x2 = (q_next - 2*q_curr + q_prev) / delta_x ** 2
 
                 #if t == 0 and i == 0 and j == 3:
-                    #foo = 10 #dbg
+                    #foo = 10
 
                 cpy[i,j] = A[i,j] + nu * delta_t * part2_q_part_x2
             A = cpy
@@ -199,8 +203,8 @@ def one_dim_diffus_advec():
 def two_dim_diffus_advec():
     m, n = 12, 12
 
-    U = 1.0  # horizontal velocity
-    V = 0.6  # vertial velocity
+    #U = 1.0  # horizontal velocity
+    #V = 0.6  # vertial velocity
     nu = 1.0 # diffusion rate.
     delta_x = 1.0
     delta_y = 1.0
@@ -208,11 +212,6 @@ def two_dim_diffus_advec():
 
     #for delta_t in (0.2,): # checkerboard
     for delta_t in (0.1,): # checkerboard
-
-        C_i_C_j = (U + V) * delta_t / delta_x    # should be <= 1.
-        r = nu * delta_t / delta_x**2            # should be <= 1/4 for 2d.
-        foo = C_i_C_j + 4*r
-        print(C_i_C_j, r, foo)
 
         A = np.zeros((m,n))
         A[1,1] = 1
@@ -225,27 +224,212 @@ def two_dim_diffus_advec():
         A[3,2] = 1
         A[3,3] = 1
 
+        wall = np.zeros((m,n), dtype=bool)
+        wall[4,6] = True
+        wall[4,7] = True
+        wall[4,8] = True
+        wall[5,6] = True
+        wall[5,7] = True
+        wall[5,8] = True
+        wall[6,6] = True
+        wall[6,7] = True
+        wall[6,8] = True
+
+        U = np.zeros((m,n))
+        V = np.zeros((m,n))
+        u_default = 1.0
+        v_default = 0.6
+
+        for (i, j), val in np.ndenumerate(A):
+            if not wall[i,j]:
+                U[i,j] = u_default
+                V[i,j] = v_default
+
+        C_i_C_j = (u_default + v_default) * delta_t / delta_x    # should be <= 1.
+        r = nu * delta_t / delta_x**2            # should be <= 1/4 for 2d.
+        foo = C_i_C_j + 4*r
+        print(C_i_C_j, r, foo)
+
         t = 0
         pr(A)
         print()
         for step in range(20):
             cpy = A.copy()
             for (i, j), val in np.ndenumerate(A):
+                if wall[i,j]:
+                    continue
                 q_cr = A[i,j]
-                q_lt = A[i,(j-1) % A.shape[1]]
-                q_rt = A[i,(j+1) % A.shape[1]]
-                q_up = A[(i-1) % A.shape[0], j]
-                q_dn = A[(i+1) % A.shape[0], j]
+                q_lt = 0 if wall[i,(j-1) % A.shape[1]] else A[i,(j-1) % A.shape[1]]
+                q_rt = 0 if wall[i,(j+1) % A.shape[1]] else A[i,(j+1) % A.shape[1]]
+                q_up = 0 if wall[(i-1) % A.shape[0],j] else A[(i-1) % A.shape[0], j]
+                q_dn = 0 if wall[(i+1) % A.shape[0],j] else A[(i+1) % A.shape[0], j]
 
                 laplace_q = (q_rt + q_lt + q_dn + q_up - 4*q_cr) / (delta_x**2)
 
                 cpy[i,j] = q_cr \
-                    - U * delta_t * ((q_cr - q_lt) / delta_x) \
-                    - V * delta_t * ((q_cr - q_up) / delta_x) \
+                    - U[i,j] * delta_t * ((q_cr - q_lt) / delta_x) \
+                    - V[i,j] * delta_t * ((q_cr - q_up) / delta_x) \
                     + nu * delta_t * laplace_q
             A = cpy
             pr(A)
             print()
+
+def lbm_simple_f():
+    m, n, p = 5, 5, 9
+    f = np.zeros((m, n, p))
+    f[2, 3, 1] = 1
+
+    pr(f[:,:,1])
+    print()
+
+    hop_offsets = list()
+    hop_offsets.append([ 0, 0])
+    hop_offsets.append([ 0, 1])
+    hop_offsets.append([-1, 0])
+    hop_offsets.append([ 0,-1])
+    hop_offsets.append([ 1, 0])
+    hop_offsets.append([-1, 1])
+    hop_offsets.append([-1,-1])
+    hop_offsets.append([ 1,-1])
+    hop_offsets.append([ 1, 1])
+    
+    f_new = np.zeros((m, n, p))
+
+    for (i, j, k), val in np.ndenumerate(f):
+        i_wrapped = (i - hop_offsets[k][0]) % f.shape[0]
+        j_wrapped = (j - hop_offsets[k][1]) % f.shape[1]
+        f_new[i,j,k] = f[i_wrapped, j_wrapped, k]
+        pass
+    
+    f = f_new
+    pr(f[:,:,1])
+
+def collide():
+    m, n, p = 1, 1, 9
+    f = np.zeros((m, n, p))
+    #f[0,0,1] = 0.1
+    f[0,0,:] = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36]
+
+    delta_j = [0, 1, 0, -1, 0, 1, -1, -1, 1]
+    delta_i = [0, 0, -1, 0, 1, -1, -1, 1, 1]
+    w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36]
+
+    rho = 0
+    for k in range(9):
+        rho += f[0,0,k]
+    u = 0
+    v = 0
+    for k in range(9):
+        u += f[0,0,k] * delta_j[k]
+        v += f[0,0,k] * delta_i[k]
+    u /= rho
+    v /= rho
+
+    print(rho, u, v)
+
+    f_eq = np.zeros((m, n, p))
+    speed2 = u*u + v*v
+
+    for k in range(9):
+        s = delta_j[k] * u + delta_i[k] * v
+        f_eq[0,0,k] = w[k] * rho * (1 + 3*s + 4.5 * s * s - 1.5 * speed2)
+
+    print(f_eq[0,0,:])
+
+    tau = 1
+    for k in range(9):
+        f[0,0,k] = f[0,0,k] - (1/tau) * (f[0,0,k] - f_eq[0,0,k])
+
+    print(f_eq[0,0,:])
+
+def collide_small_grid():
+
+    delta_j = [0, 1, 0, -1, 0, 1, -1, -1, 1]
+    delta_i = [0, 0, -1, 0, 1, -1, -1, 1, 1]
+    w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36]
+    tau = 1
+    opp = [0, 3, 4, 1, 2, 7, 8, 5, 6]
+
+    m, n, p = 5, 5, 9
+    #m, n, p = 12, 12, 9
+    f = np.zeros((m, n, p))
+    wall = np.zeros((m,n), dtype=bool)
+
+    # initialize f to rest weights
+    for (i, j, k), val in np.ndenumerate(f):
+        f[i,j,k] = w[k]
+
+    # small disturbance.
+    f[2,1,1] += 0.25
+
+    # set up wall.
+    wall[:,4] = True
+    f[:,4,:] = 0 # walls have no fluid.
+
+    for step in range(8):
+
+        # collide.
+
+        f_collided = f.copy()
+        for i in range(m):
+            for j in range(n):
+                if wall[i,j]:
+                    continue
+
+                rho = 0
+                for k in range(p):
+                    rho += f[i,j,k]
+
+                u = 0
+                v = 0
+                for k in range(p):
+                    u += (f[i,j,k] * delta_j[k])
+                    v += (f[i,j,k] * delta_i[k])
+                u /= rho
+                v /= rho
+
+                f_eq = np.zeros((m, n, p))
+                speed2 = u*u + v*v
+
+                # f_eq for this cell.
+                for k in range(p):
+                    s = delta_j[k] * u + delta_i[k] * v
+                    f_eq[i,j,k] = w[k] * rho * (1 + 3*s + 4.5 * s * s - 1.5 * speed2)
+
+                for k in range(p):
+                    f_collided[i,j,k] = f[i,j,k] - (1/tau) * (f[i,j,k] - f_eq[i,j,k])
+
+        #stream.
+
+        f_stream = f.copy()
+        for i in range(m):
+            for j in range(n):
+                if wall[i,j]:
+                    continue
+
+                for k in range(p):
+                    i_wrapped = (i-delta_i[k]) % f.shape[0]
+                    j_wrapped = (j-delta_j[k]) % f.shape[1]
+
+                    if wall[i_wrapped,j_wrapped]:
+                        # donor cell is a wall.
+                        f_stream[i,j,k] = f_collided[i, j, opp[k]]
+                    else:
+                        # donor cell is not a wall.
+                        f_stream[i,j,k] = f_collided[i_wrapped, j_wrapped, k]
+                
+        f = f_stream
+        f_sum = np.sum(f, axis=2)
+
+        print(np.sum(f_sum))
+        print(f_sum)
+        print()
+
+        #pr(arry_normalize(f_sum))
+        #print()
+        #time.sleep(0.1)
+
+
 
 def main() -> None:
     print('hello')
@@ -254,6 +438,37 @@ def main() -> None:
     #one_dim_advec()
     #one_dim_diffusion()
     #one_dim_diffus_advec()
-    two_dim_diffus_advec()
+    #two_dim_diffus_advec()
+    #lbm_simple_f()
+    #collide()
+    collide_small_grid()
 
     print('goodbye')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
