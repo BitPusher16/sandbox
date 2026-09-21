@@ -116,7 +116,9 @@ def pr(A):
     lines = []
     for row in np.atleast_2d(np.asarray(A, dtype=float)):
         #lines.append("".join(f"{_bg(x)}{x:4.1f}{RESET}" for x in row))
-        lines.append("".join(f"{_bg(x)}{x:2.0f}{RESET}" for x in row))
+        #lines.append("".join(f"{_bg(x)}{x:2.0f}{RESET}" for x in row))
+        lines.append("".join(f"{_bg(x)}  {RESET}" for x in row))
+    lines.append("") # empty line at end.
     frame = "\n".join(lines)
 
     # back buffer: assemble off-screen, then present atomically
@@ -563,7 +565,7 @@ def operable_case():
 
 
 def operable_run():
-    arry = png_to_numpy_zero_one('shapes/airfoil_002.png')
+    arry = png_to_numpy_zero_one('shapes/naca2412_5deg_20pct_32h_64w.png')
 
     delta_j = [0, 1, 0, -1, 0, 1, -1, -1, 1]
     delta_i = [0, 0, -1, 0, 1, -1, -1, 1, 1]
@@ -596,8 +598,18 @@ def operable_run():
                 if wall[i,j]:
                     f[i,j,k] = 0
 
-    for step in range(400):
+    dPx_cumulative = 0
+    dPy_cumulative = 0
+    steps = 4000
+    skip_steps = math.floor(2 * n / u_in)
+
+    #for step in range(4000):
     #for step in range(2):
+    for step in range(steps):
+
+        # track lift, drag for this step.
+        dPx = 0
+        dPy = 0
 
         # collide.
 
@@ -646,6 +658,12 @@ def operable_run():
                     if wall[i_wrapped,j_wrapped]:
                         # donor cell is a wall.
                         f_stream[i,j,k] = f_collided[i, j, opp[k]]
+
+                        # here is a fine place to record momentum.
+                        # note: because we use -2, this shows force exerted on the body,
+                        # not the fluid.
+                        dPx += -2 * f_collided[i, j, opp[k]] * delta_j[k]
+                        dPy += -2 * f_collided[i, j, opp[k]] * delta_i[k]
                     else:
                         # donor cell is not a wall.
                         f_stream[i,j,k] = f_collided[i_wrapped, j_wrapped, k]
@@ -658,24 +676,45 @@ def operable_run():
                 for k in range(p):
                     s = delta_j[k] * u_in + delta_i[k] * v_in
                     f_stream[i, j, k] = w[k] * rho_in * (1+3*s + 4.5*s*s - 1.5*(u_in**2))
+
+        # overwrite at outlet.
+        #f_stream[:, -1, :] = f_stream[:, 0, :]
+        f_stream[:, -1, :] = f_stream [:, -2, :]
                 
         # next f is computed. replace f with it.
         f = f_stream
 
+        if step - skip_steps >= 0:
+            dPx_cumulative += dPx
+            dPy_cumulative += dPy
+
         if step % 50 == 0:
+            #print(f'dPx:{dPx: 10.8f}  dPy:{dPy: 10.8f}')
+
             f_sum = np.sum(f, axis=2)
             max_u = np.max(u)
 
             #print('f_sum:')
             #print(f_sum)
-            print('max_u:')
-            print(max_u)
+            #print('max_u:')
+            #print(max_u)
             #pr(arry_normalize(f_sum))
             #pr(masked_normalize(f_sum, wall))
             #print()
 
         pr(masked_normalize(np.sum(f, axis=2), wall))
-        print()
+
+    #pr(masked_normalize(np.sum(f, axis=2), wall))
+    #print()
+    #pr(masked_normalize(np.sqrt(u**2 + v**2), wall))
+    #print()
+    #print()
+    #max_u = np.max(u)
+    #print(f'max_u: {max_u}')
+
+    print(f'steps:{steps}, skip_steps:{skip_steps}')
+    print(f'avg dPx: {dPx_cumulative / (steps - skip_steps)}')
+    print(f'avg dPy: {dPy_cumulative / (steps - skip_steps)}')
 
 
 
