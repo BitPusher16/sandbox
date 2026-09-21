@@ -60,16 +60,42 @@ def create_simple_png():
         writer = png.Writer(width=width, height=height, greyscale=True)
         writer.write(f, png_data.tolist())
 
+#def png_to_numpy_zero_one(filepath):
+#    reader = png.Reader(filepath)
+#    width, height, rows, info = reader.asDirect()
+#
+#    img_array = np.stack(list(rows))
+#    if info['bitdepth'] == 8:
+#        img_array = img_array / 255.0
+#
+#    img_array = img_array.astype(int)
+#    return img_array
+
 def png_to_numpy_zero_one(filepath):
     reader = png.Reader(filepath)
     width, height, rows, info = reader.asDirect()
 
+    # 1. Stack the flat rows into a 2D numpy array
     img_array = np.stack(list(rows))
+    
+    # 2. Reshape from (height, width * planes) to (height, width, planes)
+    planes = info['planes']  # 3 for RGB, 4 for RGBA
+    img_array = img_array.reshape(height, width, planes)
+    
+    # 3. Scale 8-bit images to 0.0 - 1.0 range
     if info['bitdepth'] == 8:
         img_array = img_array / 255.0
 
-    img_array = img_array.astype(int)
-    return img_array
+    # 4. Extract color channels (ignore alpha channel if it exists)
+    color_channels = img_array[:, :, :3]
+
+    # 5. Create a 2D boolean mask
+    # True if R, G, and B are all 0 (black). False otherwise.
+    is_black = np.all(color_channels == 0.0, axis=-1)
+        
+    return is_black
+
+
 
 def tmp():
     print(png_to_numpy_zero_one('box_16x16.png'))
@@ -86,11 +112,32 @@ def _bg(v):
     return f"\033[48;5;{n}m"
 
 def pr(A):
+    clear = True  # set False to scroll instead of redrawing in place
+    lines = []
     for row in np.atleast_2d(np.asarray(A, dtype=float)):
-        print("".join(f"{_bg(x)}{x:6.2f}{RESET}" for x in row))
+        #lines.append("".join(f"{_bg(x)}{x:4.1f}{RESET}" for x in row))
+        lines.append("".join(f"{_bg(x)}{x:2.0f}{RESET}" for x in row))
+    frame = "\n".join(lines)
 
-def arry_normalize(A):
-    return (A - np.min(A)) / (np.max(A) - np.min(A))
+    # back buffer: assemble off-screen, then present atomically
+    parts = ["\033[?2026h", "\033[?25l"]  # begin synced update, hide cursor
+    if clear:
+        parts.append("\033[H")            # home; do not 2J (that flashes)
+    parts.append(frame)
+    parts.append("\033[J")                # erase leftover rows below the frame
+    parts.append("\033[?2026l")           # end synced update = toggle/present
+    print("".join(parts), end="", flush=True)
+
+def arry_normalize(a):
+    return (a - np.min(a)) / (np.max(a) - np.min(a))
+
+def masked_normalize(a, mask):
+    masked_data = np.ma.masked_array(a, mask=mask)
+    data_min = masked_data.min()
+    data_max = masked_data.max()
+    normalized_masked = (masked_data - data_min) / (data_max - data_min)
+    return normalized_masked
+
 
 def one_dim_advec():
     x = 1
@@ -350,6 +397,11 @@ def collide_small_grid():
     tau = 1
     opp = [0, 3, 4, 1, 2, 7, 8, 5, 6]
 
+    # inlet.
+    rho_in = 1
+    u_in = 0.05
+    v_in = 0
+
     m, n, p = 5, 5, 9
     #m, n, p = 12, 12, 9
     f = np.zeros((m, n, p))
@@ -360,17 +412,26 @@ def collide_small_grid():
         f[i,j,k] = w[k]
 
     # small disturbance.
-    f[2,1,1] += 0.25
+    #f[2,1,1] += 0.25
 
     # set up wall.
-    wall[:,4] = True
-    f[:,4,:] = 0 # walls have no fluid.
+    #wall[:,4] = True
+    #f[:,4,:] = 0 # walls have no fluid.
+    wall[2,4] = True
+    wall[3,4] = True
+    for i in range(m):
+        for j in range(n):
+            for k in range(p):
+                if wall[i,j]:
+                    f[i,j,k] = 0
 
     for step in range(8):
 
         # collide.
 
-        f_collided = f.copy()
+        #f_collided = f.copy()
+        f_collided = np.zeros((m, n, p))
+        f_eq = np.zeros((m, n, p))
         for i in range(m):
             for j in range(n):
                 if wall[i,j]:
@@ -388,7 +449,7 @@ def collide_small_grid():
                 u /= rho
                 v /= rho
 
-                f_eq = np.zeros((m, n, p))
+                #f_eq = np.zeros((m, n, p))
                 speed2 = u*u + v*v
 
                 # f_eq for this cell.
@@ -417,17 +478,204 @@ def collide_small_grid():
                     else:
                         # donor cell is not a wall.
                         f_stream[i,j,k] = f_collided[i_wrapped, j_wrapped, k]
+
+        # overwrite stream at inlet.
+        for i in range(m):
+            for j in range(1):
+                if wall[i,j]:
+                    continue
+                for k in range(p):
+                    s = delta_j[k] * u_in + delta_i[k] * v_in
+                    f_stream[i, j, k] = w[k] * rho_in * (1+3*s + 4.5*s*s - 1.5*(u_in**2))
                 
         f = f_stream
-        f_sum = np.sum(f, axis=2)
 
-        print(np.sum(f_sum))
+        f_sum = np.sum(f, axis=2)
+        print('f_sum:')
         print(f_sum)
+        print()
+
+        # debug. i did not store u in a grid, so need to compute that now.
+        u_grid = np.zeros((m, n, p))
+        for i in range(m):
+            for j in range(n):
+                if wall[i,j]:
+                    continue
+                rho = 0
+                for k in range(p):
+                    rho += f[i,j,k]
+                u = 0
+                v = 0
+                for k in range(p):
+                    u += (f[i,j,k] * delta_j[k])
+                    v += (f[i,j,k] * delta_i[k])
+                u /= rho
+                v /= rho
+
+                u_grid[i,j] = u
+
+        u_sum = np.sum(u_grid, axis=2)
+        print('u_sum:')
+        print(u_sum)
         print()
 
         #pr(arry_normalize(f_sum))
         #print()
         #time.sleep(0.1)
+
+def lattice_units():
+    mach_lattice_cells_per_second = 1 / math.sqrt(3)
+    mach_lattice_squared = mach_lattice_cells_per_second**2
+
+    nu_physical_m2_per_sec = 1.5 * 10**-5
+    obstacle_width_pixels = 40
+    png_width_physical_m = 2
+    png_width_pixels = 400
+    pixel_width_m = png_width_physical_m / png_width_pixels # 0.005
+    delta_x_physical_m = pixel_width_m
+    delta_y_physical_m = pixel_width_m
+
+    u_physical_m_per_sec = 10
+    #u_pixels_per_sec = u_physical_m_per_sec * pixel_width_m # this should be chosen, not computed.
+    u_cells_per_step = 0.05
+
+    delta_t_seconds = delta_x_physical_m * (u_cells_per_step / u_physical_m_per_sec)
+    tau = (1/2) + (3*nu_physical_m2_per_sec * u_cells_per_step)/(u_physical_m_per_sec*delta_x_physical_m)
+
+    nu_lattice_px2_per_step = nu_physical_m2_per_sec * (1/pixel_width_m)**2 * delta_t_seconds
+
+    re = u_cells_per_step * obstacle_width_pixels / nu_lattice_px2_per_step
+
+    print(delta_t_seconds)
+    print(tau)
+    print(nu_lattice_px2_per_step)
+    print(re)
+
+def operable_case():
+    u_lat = 0.05
+    L_lat = 20 # pixels
+    re = 100
+    nu_lat = u_lat * L_lat / re
+    tau = (1/2) + 3*nu_lat
+
+    print(nu_lat)
+    print(tau)
+
+
+def operable_run():
+    arry = png_to_numpy_zero_one('shapes/airfoil_002.png')
+
+    delta_j = [0, 1, 0, -1, 0, 1, -1, -1, 1]
+    delta_i = [0, 0, -1, 0, 1, -1, -1, 1, 1]
+    w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36]
+    tau = 0.6
+    opp = [0, 3, 4, 1, 2, 7, 8, 5, 6]
+
+    # inlet.
+    rho_in = 1
+    u_in = 0.05
+    v_in = 0
+
+    #m, n, p = 12, 24, 9
+    m, n, p = arry.shape[0], arry.shape[1], 9
+    f = np.zeros((m, n, p))
+    u = np.zeros((m, n))
+    v = np.zeros((m, n))
+    #wall = np.zeros((m,n), dtype=bool)
+    wall = arry.copy()
+
+    # initialize f to rest weights
+    for (i, j, k), val in np.ndenumerate(f):
+        f[i,j,k] = w[k]
+
+    # set up wall.
+    #wall[5:7,4:10] = True
+    for i in range(m):
+        for j in range(n):
+            for k in range(p):
+                if wall[i,j]:
+                    f[i,j,k] = 0
+
+    for step in range(400):
+    #for step in range(2):
+
+        # collide.
+
+        f_eq = np.zeros((m, n, p))
+        f_collided = np.zeros((m, n, p))
+
+        for i in range(m):
+            for j in range(n):
+                if wall[i,j]:
+                    continue
+
+                rho = 0
+                for k in range(p):
+                    rho += f[i,j,k]
+
+                u[i,j] = 0
+                v[i,j] = 0
+                for k in range(p):
+                    u[i,j] += (f[i,j,k] * delta_j[k])
+                    v[i,j] += (f[i,j,k] * delta_i[k])
+                u[i,j] /= rho
+                v[i,j] /= rho
+
+                speed2 = u[i,j]*u[i,j] + v[i,j]*v[i,j]
+
+                # f_eq for this cell.
+                for k in range(p):
+                    s = delta_j[k] * u[i,j] + delta_i[k] * v[i,j]
+                    f_eq[i,j,k] = w[k] * rho * (1 + 3*s + 4.5 * s * s - 1.5 * speed2)
+
+                for k in range(p):
+                    f_collided[i,j,k] = f[i,j,k] - (1/tau) * (f[i,j,k] - f_eq[i,j,k])
+
+        #stream.
+
+        f_stream = f.copy()
+        for i in range(m):
+            for j in range(n):
+                if wall[i,j]:
+                    continue
+
+                for k in range(p):
+                    i_wrapped = (i-delta_i[k]) % f.shape[0]
+                    j_wrapped = (j-delta_j[k]) % f.shape[1]
+
+                    if wall[i_wrapped,j_wrapped]:
+                        # donor cell is a wall.
+                        f_stream[i,j,k] = f_collided[i, j, opp[k]]
+                    else:
+                        # donor cell is not a wall.
+                        f_stream[i,j,k] = f_collided[i_wrapped, j_wrapped, k]
+
+        # overwrite stream at inlet.
+        for i in range(m):
+            for j in range(1):
+                if wall[i,j]:
+                    continue
+                for k in range(p):
+                    s = delta_j[k] * u_in + delta_i[k] * v_in
+                    f_stream[i, j, k] = w[k] * rho_in * (1+3*s + 4.5*s*s - 1.5*(u_in**2))
+                
+        # next f is computed. replace f with it.
+        f = f_stream
+
+        if step % 50 == 0:
+            f_sum = np.sum(f, axis=2)
+            max_u = np.max(u)
+
+            #print('f_sum:')
+            #print(f_sum)
+            print('max_u:')
+            print(max_u)
+            #pr(arry_normalize(f_sum))
+            #pr(masked_normalize(f_sum, wall))
+            #print()
+
+        pr(masked_normalize(np.sum(f, axis=2), wall))
+        print()
 
 
 
@@ -441,7 +689,10 @@ def main() -> None:
     #two_dim_diffus_advec()
     #lbm_simple_f()
     #collide()
-    collide_small_grid()
+    #collide_small_grid()
+    #lattice_units()
+    #operable_case()
+    operable_run()
 
     print('goodbye')
 
