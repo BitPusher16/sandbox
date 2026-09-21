@@ -565,12 +565,16 @@ def operable_case():
 
 
 def operable_run():
-    arry = png_to_numpy_zero_one('shapes/naca2412_5deg_20pct_32h_64w.png')
+    arry = png_to_numpy_zero_one('shapes/naca2412_5deg_20pct_128h_256w.png')
+    #arry = png_to_numpy_zero_one('shapes/naca2412_5deg_20pct_32h_64w.png')
+    #frame_file = 'data/run_001.txt'
+    #frames = list()
 
     delta_j = [0, 1, 0, -1, 0, 1, -1, -1, 1]
     delta_i = [0, 0, -1, 0, 1, -1, -1, 1, 1]
     w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36]
-    tau = 0.6
+    #tau = 0.6
+    tau = 0.52
     opp = [0, 3, 4, 1, 2, 7, 8, 5, 6]
 
     # inlet.
@@ -602,6 +606,14 @@ def operable_run():
     dPy_cumulative = 0
     steps = 4000
     skip_steps = math.floor(2 * n / u_in)
+    #steps = 200
+    #skip_steps = 2
+
+    #frame_file = 'data/run_002.npy'
+    frame_file = 'data/run_004.npy'
+    frames = np.lib.format.open_memmap(
+        frame_file, mode='w+', dtype=np.float64, shape=(steps, m, n, p),
+    )
 
     #for step in range(4000):
     #for step in range(2):
@@ -702,7 +714,12 @@ def operable_run():
             #pr(masked_normalize(f_sum, wall))
             #print()
 
-        pr(masked_normalize(np.sum(f, axis=2), wall))
+        #pr(masked_normalize(np.sum(f, axis=2), wall))
+        print(step)
+
+
+        #frames.append(f)
+        frames[step] = f
 
     #pr(masked_normalize(np.sum(f, axis=2), wall))
     #print()
@@ -715,6 +732,19 @@ def operable_run():
     print(f'steps:{steps}, skip_steps:{skip_steps}')
     print(f'avg dPx: {dPx_cumulative / (steps - skip_steps)}')
     print(f'avg dPy: {dPy_cumulative / (steps - skip_steps)}')
+
+    #np.set_printoptions(threshold=np.inf)
+    #with open(frame_file, 'w') as out:
+    #    for frame in frames:
+    #        print(frame, file = out)
+    frames.flush()
+
+    # reload and replay:
+    #frames = np.load('data/run_001.npy', mmap_mode='r')
+    #wall = png_to_numpy_zero_one('shapes/naca2412_5deg_20pct_32h_64w.png')
+    #for t in range(frames.shape[0]):
+    #    pr(masked_normalize(np.sum(frames[t], axis=2), wall))
+    #    time.sleep(0.05)
 
 
 

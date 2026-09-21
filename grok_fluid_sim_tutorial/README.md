@@ -21,3 +21,4 @@ uv venv
 # run with (note uv init replaces underscores with hyphens):
 uv run grok-fluid-sim-tutorial
 
+# uv run python npy_to_mp4.py data/run_003.npy
