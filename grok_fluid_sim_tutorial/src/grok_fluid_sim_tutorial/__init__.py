@@ -15,6 +15,8 @@ import numpy as np
 import png
 import math
 import time
+import json
+from pathlib import Path
 
 class Point:
     """A class representing a 2D point on a Cartesian plane."""
@@ -565,25 +567,33 @@ def operable_case():
 
 
 def operable_run():
-    arry = png_to_numpy_zero_one('shapes/naca2412_5deg_20pct_128h_256w.png')
-    #arry = png_to_numpy_zero_one('shapes/naca2412_5deg_20pct_32h_64w.png')
-    #frame_file = 'data/run_001.txt'
-    #frames = list()
+    #wall_file = 'shapes/naca2412_5deg_20pct_128h_256w.png'
+    #wall_file = 'shapes/naca2412_10deg_30pct_32h_64w.png'
+    wall_file = 'shapes/naca2412_10deg_30pct_128h_256w.png'
+    frame_file = 'data/run_008.npy'
+
+    arry = png_to_numpy_zero_one(wall_file)
+    m, n, p = arry.shape[0], arry.shape[1], 9
 
     delta_j = [0, 1, 0, -1, 0, 1, -1, -1, 1]
     delta_i = [0, 0, -1, 0, 1, -1, -1, 1, 1]
     w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36]
     #tau = 0.6
-    tau = 0.52
+    #tau = 0.52
+    tau = 0.51
     opp = [0, 3, 4, 1, 2, 7, 8, 5, 6]
 
     # inlet.
     rho_in = 1
-    u_in = 0.05
+    #u_in = 0.05
+    u_in = 0.10
     v_in = 0
 
-    #m, n, p = 12, 24, 9
-    m, n, p = arry.shape[0], arry.shape[1], 9
+    # run params.
+    steps = 9000
+    # skipped steps are not used in lift calculation.
+    skip_steps = math.floor(3 * n / u_in) 
+
     f = np.zeros((m, n, p))
     u = np.zeros((m, n))
     v = np.zeros((m, n))
@@ -604,13 +614,7 @@ def operable_run():
 
     dPx_cumulative = 0
     dPy_cumulative = 0
-    steps = 4000
-    skip_steps = math.floor(2 * n / u_in)
-    #steps = 200
-    #skip_steps = 2
 
-    #frame_file = 'data/run_002.npy'
-    frame_file = 'data/run_004.npy'
     frames = np.lib.format.open_memmap(
         frame_file, mode='w+', dtype=np.float64, shape=(steps, m, n, p),
     )
@@ -714,12 +718,13 @@ def operable_run():
             #pr(masked_normalize(f_sum, wall))
             #print()
 
-        #pr(masked_normalize(np.sum(f, axis=2), wall))
-        print(step)
-
+        pr(masked_normalize(np.sum(f, axis=2), wall))
+        print(f'step {step} of {steps}, skipping {skip_steps}')
 
         #frames.append(f)
         frames[step] = f
+
+    # END step loop
 
     #pr(masked_normalize(np.sum(f, axis=2), wall))
     #print()
@@ -738,6 +743,18 @@ def operable_run():
     #    for frame in frames:
     #        print(frame, file = out)
     frames.flush()
+
+    metadata = {
+        "tau": float(tau),
+        "u_in": float(u_in),
+        "v_in": float(v_in),
+        "rho_in": float(rho_in),
+        "skip_steps": int(skip_steps),
+        "dPx_avg": float(dPx_cumulative / (steps - skip_steps)),
+        "dPy_avg": float(dPy_cumulative / (steps - skip_steps)),
+        "wall": wall_file,
+    }
+    Path(frame_file).with_suffix(".json").write_text(json.dumps(metadata, indent=2))
 
     # reload and replay:
     #frames = np.load('data/run_001.npy', mmap_mode='r')
