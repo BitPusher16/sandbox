@@ -572,8 +572,9 @@ def operable_case():
 def operable_run():
     #wall_file = 'shapes/naca2412_5deg_20pct_128h_256w.png'
     #wall_file = 'shapes/naca2412_10deg_30pct_32h_64w.png'
-    wall_file = 'shapes/naca2412_10deg_30pct_128h_256w.png'
-    frame_file = 'data/run_011.npy'
+    #wall_file = 'shapes/naca2412_10deg_30pct_128h_256w.png'
+    #wall_file = 'shapes/cylinder_r65_c55_d20_128h_256w.png'
+    frame_file = 'data/run_017.npy'
 
     arry = png_to_numpy_zero_one(wall_file)
     arry_typed = np.ascontiguousarray(arry.astype(np.bool_))
@@ -581,14 +582,17 @@ def operable_run():
 
     # inlet.
     rho_in = 1
-    u_in = 0.05
+    #u_in = 0.05
     u_in = 0.10
+    #u_in = 0.08
     v_in = 0
 
-    tau = 0.51
+    #tau = 0.51
+    #tau = 0.53
+    tau = 0.53
 
     # run params.
-    steps = 9000
+    steps = 20000
     # skipped steps are not used in lift calculation.
     skip_steps = math.floor(3 * n / u_in) 
 
@@ -731,6 +735,9 @@ def operable_run_typed_wall(arry: np.ndarray, frames, steps, skip_steps, rho_in,
                 for k in range(p):
                     s = delta_j[k] * u_in + delta_i[k] * v_in
                     f_stream[i, j, k] = w[k] * rho_in * (1+3*s + 4.5*s*s - 1.5*(u_in**2))
+
+        # minor perturbation to break symmetry.
+        #f_stream[1, 1, 0] *= 1.0000001
 
         # overwrite at outlet.
         #f_stream[:, -1, :] = f_stream[:, 0, :]

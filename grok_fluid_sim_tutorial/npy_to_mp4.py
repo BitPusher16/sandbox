@@ -33,7 +33,8 @@ import numpy as np
 # =============================================================================
 NORM_MODE = "frame"
 NORM_BORDER = 2
-FPS = 60
+#FPS = 60
+FPS = 480
 
 #NORM_STDEV_LO = 2.0
 #NORM_STDEV_HI = 2.0
