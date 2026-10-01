@@ -14,9 +14,10 @@
 import numpy as np
 import png
 import math
-import time
+#import time
 import json
 from pathlib import Path
+from numba import njit, prange
 
 class Point:
     """A class representing a 2D point on a Cartesian plane."""
@@ -43,24 +44,24 @@ class Point:
         """Returns a user-friendly string representation."""
         return f"({self.x}, {self.y})"
 
-def create_simple_png():
-
-    height = 16
-    width = 16
-
-    grid = np.zeros((height, width), dtype=np.uint8)
-    #grid[:,width // 2 :] = 1 # set right half to 1
-    grid[:,:] = 1
-    grid[1:-1,1:-1] = 0
-
-
-    png_data = grid * 255
-
-    #filename = 'right_half_16x16.png'
-    filename = 'box_16x16.png'
-    with open(filename, "wb") as f:
-        writer = png.Writer(width=width, height=height, greyscale=True)
-        writer.write(f, png_data.tolist())
+#def create_simple_png():
+#
+#    height = 16
+#    width = 16
+#
+#    grid = np.zeros((height, width), dtype=np.uint8)
+#    #grid[:,width // 2 :] = 1 # set right half to 1
+#    grid[:,:] = 1
+#    grid[1:-1,1:-1] = 0
+#
+#
+#    png_data = grid * 255
+#
+#    #filename = 'right_half_16x16.png'
+#    filename = 'box_16x16.png'
+#    with open(filename, "wb") as f:
+#        writer = png.Writer(width=width, height=height, greyscale=True)
+#        writer.write(f, png_data.tolist())
 
 #def png_to_numpy_zero_one(filepath):
 #    reader = png.Reader(filepath)
@@ -94,8 +95,11 @@ def png_to_numpy_zero_one(filepath):
     # 5. Create a 2D boolean mask
     # True if R, G, and B are all 0 (black). False otherwise.
     is_black = np.all(color_channels == 0.0, axis=-1)
+
+    #is_black_typed = np.ascontiguousarray(is_black.astype(np.bool_))
         
     return is_black
+    #return is_black_typed
 
 
 
@@ -565,14 +569,54 @@ def operable_case():
     print(nu_lat)
     print(tau)
 
-
 def operable_run():
     #wall_file = 'shapes/naca2412_5deg_20pct_128h_256w.png'
     #wall_file = 'shapes/naca2412_10deg_30pct_32h_64w.png'
     wall_file = 'shapes/naca2412_10deg_30pct_128h_256w.png'
-    frame_file = 'data/run_008.npy'
+    frame_file = 'data/run_011.npy'
 
     arry = png_to_numpy_zero_one(wall_file)
+    arry_typed = np.ascontiguousarray(arry.astype(np.bool_))
+    m, n, p = arry.shape[0], arry.shape[1], 9
+
+    # inlet.
+    rho_in = 1
+    u_in = 0.05
+    u_in = 0.10
+    v_in = 0
+
+    tau = 0.51
+
+    # run params.
+    steps = 9000
+    # skipped steps are not used in lift calculation.
+    skip_steps = math.floor(3 * n / u_in) 
+
+
+    frames = np.lib.format.open_memmap(
+        frame_file, mode='w+', dtype=np.float64, shape=(steps, m, n, p),
+    )
+
+    frames, dPx_cumulative, dPy_cumulative = operable_run_typed_wall(
+            arry_typed, frames, steps, skip_steps, rho_in, u_in, v_in, tau)
+
+    frames.flush()
+
+    metadata = {
+        "tau": float(tau),
+        "u_in": float(u_in),
+        "v_in": float(v_in),
+        "rho_in": float(rho_in),
+        "skip_steps": int(skip_steps),
+        "dPx_avg": float(dPx_cumulative / (steps - skip_steps)),
+        "dPy_avg": float(dPy_cumulative / (steps - skip_steps)),
+        "wall": wall_file,
+    }
+    Path(frame_file).with_suffix(".json").write_text(json.dumps(metadata, indent=2))
+
+
+@njit
+def operable_run_typed_wall(arry: np.ndarray, frames, steps, skip_steps, rho_in, u_in, v_in, tau):
     m, n, p = arry.shape[0], arry.shape[1], 9
 
     delta_j = [0, 1, 0, -1, 0, 1, -1, -1, 1]
@@ -580,19 +624,14 @@ def operable_run():
     w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36]
     #tau = 0.6
     #tau = 0.52
-    tau = 0.51
+    #tau = 0.51
     opp = [0, 3, 4, 1, 2, 7, 8, 5, 6]
 
     # inlet.
-    rho_in = 1
+    #rho_in = 1
     #u_in = 0.05
-    u_in = 0.10
-    v_in = 0
-
-    # run params.
-    steps = 9000
-    # skipped steps are not used in lift calculation.
-    skip_steps = math.floor(3 * n / u_in) 
+    #u_in = 0.10
+    #v_in = 0
 
     f = np.zeros((m, n, p))
     u = np.zeros((m, n))
@@ -615,9 +654,9 @@ def operable_run():
     dPx_cumulative = 0
     dPy_cumulative = 0
 
-    frames = np.lib.format.open_memmap(
-        frame_file, mode='w+', dtype=np.float64, shape=(steps, m, n, p),
-    )
+    #frames = np.lib.format.open_memmap(
+    #    frame_file, mode='w+', dtype=np.float64, shape=(steps, m, n, p),
+    #)
 
     #for step in range(4000):
     #for step in range(2):
@@ -718,7 +757,9 @@ def operable_run():
             #pr(masked_normalize(f_sum, wall))
             #print()
 
-        pr(masked_normalize(np.sum(f, axis=2), wall))
+        # not compatible with numba njit.
+        #pr(masked_normalize(np.sum(f, axis=2), wall))
+
         print(f'step {step} of {steps}, skipping {skip_steps}')
 
         #frames.append(f)
@@ -738,23 +779,26 @@ def operable_run():
     print(f'avg dPx: {dPx_cumulative / (steps - skip_steps)}')
     print(f'avg dPy: {dPy_cumulative / (steps - skip_steps)}')
 
+
     #np.set_printoptions(threshold=np.inf)
     #with open(frame_file, 'w') as out:
     #    for frame in frames:
     #        print(frame, file = out)
-    frames.flush()
+    #frames.flush()
 
-    metadata = {
-        "tau": float(tau),
-        "u_in": float(u_in),
-        "v_in": float(v_in),
-        "rho_in": float(rho_in),
-        "skip_steps": int(skip_steps),
-        "dPx_avg": float(dPx_cumulative / (steps - skip_steps)),
-        "dPy_avg": float(dPy_cumulative / (steps - skip_steps)),
-        "wall": wall_file,
-    }
-    Path(frame_file).with_suffix(".json").write_text(json.dumps(metadata, indent=2))
+    return frames, dPx_cumulative, dPy_cumulative
+
+    #metadata = {
+    #    "tau": float(tau),
+    #    "u_in": float(u_in),
+    #    "v_in": float(v_in),
+    #    "rho_in": float(rho_in),
+    #    "skip_steps": int(skip_steps),
+    #    "dPx_avg": float(dPx_cumulative / (steps - skip_steps)),
+    #    "dPy_avg": float(dPy_cumulative / (steps - skip_steps)),
+    #    "wall": wall_file,
+    #}
+    #Path(frame_file).with_suffix(".json").write_text(json.dumps(metadata, indent=2))
 
     # reload and replay:
     #frames = np.load('data/run_001.npy', mmap_mode='r')
